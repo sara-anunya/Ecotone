@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Point Cloud - Three.js</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #0a0a0a;
+        }
+        #container {
+            width: 100%;
+            height: 100%;
+        }
+        .overlay {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(42, 42, 42, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            gap: 15px;
+        }
+        .overlay label {
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 14px;
+        }
+        .overlay input[type="radio"] {
+            cursor: pointer;
+        }
+        .controls {
+            position: fixed;
+            top: 70px;
+            left: 20px;
+            background-color: rgba(42, 42, 42, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 250px;
+        }
+        .controls label {
+            color: #fff;
+            font-size: 14px;
+            display: block;
+        }
+        .controls span {
+            display: inline-block;
+            width: 40px;
+            text-align: right;
+        }
+        .controls input[type="range"] {
+            width: 100%;
+            margin-top: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <div class="overlay">
+        <label><input type="radio" name="dataset" value="BMT_Pointcloud_sample_10k.csv" checked> 10k</label>
+        <label><input type="radio" name="dataset" value="BMT_Pointcloud_sample_100k.csv"> 100k</label>
+        <label><input type="radio" name="dataset" value="BMT_Pointcloud_sample_500k.csv"> 500k</label>
+        <label><input type="radio" name="dataset" value="BMT_Pointcloud_XYZ_normalized_int.csv"> Full (2.8M)</label>
+    </div>
+    <div class="controls">
+        <label>
+            Max Z for color: <span id="maxZValue">100%</span>
+            <input type="range" id="maxZSlider" min="10" max="100" value="100" step="1">
+        </label>
+    </div>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="threejs.js"></script>
+</body>
+</html>
