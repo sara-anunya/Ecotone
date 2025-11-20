@@ -15,6 +15,7 @@
             height: 100vh;
             overflow: hidden;
             background-color: #0a0a0a;
+            cursor: none;
         }
         #container {
             width: 100%;
@@ -65,6 +66,54 @@
             margin-top: 8px;
             cursor: pointer;
         }
+        .perspective-controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: rgba(42, 42, 42, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            gap: 15px;
+        }
+        .perspective-controls label {
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 14px;
+        }
+        .perspective-controls input[type="radio"] {
+            cursor: pointer;
+        }
+        #cursor {
+            position: fixed;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 9999;
+            transition: width 0.3s, height 0.3s, border-color 0.1s, background-color 0.1s;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+        }
+        #info {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(42, 42, 42, 0.9);
+            padding: 10px 15px;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 12px;
+            max-width: 300px;
+        }
+        #info a {
+            color: #6cb7ff;
+            text-decoration: none;
+        }
+        #info a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -80,6 +129,17 @@
             Max Z for color: <span id="maxZValue">100%</span>
             <input type="range" id="maxZSlider" min="10" max="100" value="100" step="1">
         </label>
+    </div>
+    <div class="perspective-controls">
+        <label><input type="radio" name="perspective" value="human" checked> Human</label>
+        <label><input type="radio" name="perspective" value="bird"> Bird</label>
+        <label><input type="radio" name="perspective" value="mouse"> Mouse</label>
+    </div>
+    <div id="cursor"></div>
+    <div id="info">
+        <strong>Navigation:</strong> Arrow keys (↑↓←→) or Mouse Wheel to move<br>
+        <strong>Zoom:</strong> Z (in) / X (out) | <strong>Area:</strong> 150,000 sq ft<br>
+        <strong>iNaturalist:</strong> Click yellow markers
     </div>
     <script type="importmap">
     {
