@@ -78,7 +78,10 @@ function init() {
     // Start with a good view of the data - positioned outside and looking at it
     // Y starts from 0 and goes up, X and Z are centered around origin
     // Position camera back and slightly elevated to see the full cloud
-    camera.position.set(800, 800, 1500); // Positioned to get a good overview of the data
+    camera.position.set(0, 800, 1500); // Positioned to get a good overview of the data
+
+    // Set initial camera direction to look toward the center
+    camera.lookAt(0, 500, 0);
 
     // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -96,8 +99,7 @@ function init() {
     raycaster.params.Sprite = {}; // Enable sprite detection
     mouse = new THREE.Vector2();
 
-    // Apply initial perspective settings
-    updatePerspective('human');
+    // Note: Don't call updatePerspective here - it will be called after data loads
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
@@ -293,18 +295,25 @@ function updatePerspective(perspective) {
     const sceneHeightScale = 10; // Adjusted scale factor for better visibility
     const eyeLevelHeight = settings.eyeLevel * sceneHeightScale;
 
+    // Store current position
+    const currentX = camera.position.x;
+    const currentZ = camera.position.z;
+
     // Set camera position for first-person view
     // Keep current X and Z position, only update Y (height)
-    camera.position.y = eyeLevelHeight;
+    camera.position.set(currentX, eyeLevelHeight, currentZ);
 
     // Lock the camera to look straight ahead (horizontal view)
-    // Look toward the center of the point cloud
-    // Since Y starts from 0, the vertical center is around 500-1000 units
-    const lookAtPoint = new THREE.Vector3(
-        0, // Look toward center X (centered)
-        500, // Look at middle height of point cloud (roughly half of typical height range)
-        0 // Look toward center Z (centered)
-    );
+    // Calculate a point in front of the camera at the same eye level
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.y = 0; // Keep direction horizontal
+    forward.normalize();
+
+    const lookAtPoint = new THREE.Vector3();
+    lookAtPoint.copy(camera.position);
+    lookAtPoint.addScaledVector(forward, 1000);
+    lookAtPoint.y = eyeLevelHeight; // Same height as camera for locked horizontal view
     camera.lookAt(lookAtPoint);
 
     // Update cursor size
@@ -314,6 +323,7 @@ function updatePerspective(perspective) {
 
     console.log(`Switched to ${perspective} perspective:`, settings.description);
     console.log(`Eye level height in scene: ${eyeLevelHeight.toFixed(2)} units`);
+    console.log(`Camera position: (${currentX.toFixed(2)}, ${eyeLevelHeight.toFixed(2)}, ${currentZ.toFixed(2)})`);
 }
 
 function animate() {
@@ -372,9 +382,11 @@ function handleMovement() {
     // Lock the Y position to eye level (no vertical movement)
     camera.position.y = eyeLevelHeight;
 
-    // Keep camera looking toward the center of the point cloud
-    // Y is not centered - it starts from 0, so look at middle height
-    const lookAtPoint = new THREE.Vector3(0, 500, 0);
+    // Keep camera looking straight ahead at eye level (first-person view)
+    const lookAtPoint = new THREE.Vector3();
+    lookAtPoint.copy(camera.position);
+    lookAtPoint.addScaledVector(forward, 1000);
+    lookAtPoint.y = eyeLevelHeight; // Lock vertical looking angle
     camera.lookAt(lookAtPoint);
 }
 
@@ -601,6 +613,16 @@ function visualizeData(data) {
     console.log('Geometry vertices:', geometry.attributes.position.count);
     console.log('Material:', material);
 
+    // Log the actual Y bounds of the rendered point cloud for debugging
+    const positionsArray = geometry.attributes.position;
+    let minYBound = Infinity, maxYBound = -Infinity;
+    for (let i = 0; i < positionsArray.count; i++) {
+        const yVal = positionsArray.getY(i);
+        if (yVal < minYBound) minYBound = yVal;
+        if (yVal > maxYBound) maxYBound = yVal;
+    }
+    console.log(`Point cloud Y range: ${minYBound.toFixed(2)} to ${maxYBound.toFixed(2)} units`);
+
     // Link random points to iNaturalist data
     linkRandomPointsToiNaturalist(data.length);
 }
@@ -648,6 +670,27 @@ function linkRandomPointsToiNaturalist(totalPoints) {
     linkedPoints.forEach(p => {
         console.log(`  - Point ${p.index}: ${p.species} (${p.taxon})`);
     });
+
+    // Position camera near the first linked point for a good initial view
+    if (linkedPoints.length > 0) {
+        const firstLinkedPoint = linkedPoints[0];
+        const positions = pointCloud.geometry.attributes.position;
+        const x = positions.getX(firstLinkedPoint.index);
+        const y = positions.getY(firstLinkedPoint.index);
+        const z = positions.getZ(firstLinkedPoint.index);
+
+        // Position camera behind the point at human eye level
+        const settings = perspectiveSettings['human']; // Start with human perspective
+        const eyeLevelHeight = settings.eyeLevel * 10;
+
+        // Position camera 300 units back from the linked point
+        camera.position.set(x, eyeLevelHeight, z + 300);
+
+        // Look at a point straight ahead (not at the marker itself for first-person view)
+        camera.lookAt(x, eyeLevelHeight, z - 500);
+
+        console.log(`Camera positioned near ${firstLinkedPoint.species} at (${x.toFixed(2)}, ${eyeLevelHeight.toFixed(2)}, ${(z + 300).toFixed(2)})`);
+    }
 }
 
 function createMarkerSprite() {
