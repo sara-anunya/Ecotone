@@ -137,9 +137,15 @@
     </div>
     <div id="cursor"></div>
     <div id="info">
-        <strong>Navigation:</strong> Arrow keys (↑↓←→) or Mouse Wheel to move<br>
-        <strong>Zoom:</strong> Z (in) / X (out) | <strong>Area:</strong> 150,000 sq ft<br>
-        <strong>iNaturalist:</strong> Click yellow markers
+        <strong>🎮 Predator vs Prey Game</strong><br>
+        <strong>Navigation:</strong> Arrow keys (↑↓←→) to move<br>
+        <strong>Goal:</strong> Find and catch other creatures!<br>
+        <strong>Score:</strong> <span id="score">0</span> | <strong>Caught:</strong> <span id="caught">0</span>
+    </div>
+    <div id="gameStatus" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+         background-color: rgba(42, 42, 42, 0.95); padding: 30px; border-radius: 12px;
+         color: #fff; font-size: 18px; text-align: center; display: none; z-index: 10000;">
+        <div id="statusMessage"></div>
     </div>
     <script type="importmap">
     {

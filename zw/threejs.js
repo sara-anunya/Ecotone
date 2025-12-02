@@ -6,6 +6,16 @@ let currentData = [];
 let currentMaxZPercent = 100;
 let currentPerspective = 'human';
 
+// Game entities - predator vs prey
+let humanCharacter, owlCharacter, mouseCharacter;
+let gameState = {
+    score: 0,
+    humanCaught: 0,
+    owlCaught: 0,
+    mouseCaught: 0,
+    gameActive: true
+};
+
 // Perspective settings for different animals
 // Data represents 150,000 sq ft area (~13,935 sq meters)
 // Scene is normalized to ~2000 units, so 1 unit ≈ 6.97 sq ft
@@ -331,6 +341,9 @@ function animate() {
 
     // Handle keyboard movement
     handleMovement();
+
+    // Update AI characters
+    updateAICharacters();
 
     // Update cursor color based on hovered point
     updateCursorColor();
@@ -691,6 +704,227 @@ function linkRandomPointsToiNaturalist(totalPoints) {
 
         console.log(`Camera positioned near ${firstLinkedPoint.species} at (${x.toFixed(2)}, ${eyeLevelHeight.toFixed(2)}, ${(z + 300).toFixed(2)})`);
     }
+
+    // Create game characters after data is loaded
+    createGameCharacters();
+}
+
+// Create game character entities
+function createGameCharacters() {
+    // Human: 6 feet = ~183cm = 1830 units in our scale
+    // White blob at human eye level
+    const humanGeometry = new THREE.SphereGeometry(90, 32, 32); // 6ft diameter
+    const humanMaterial = new THREE.MeshPhongMaterial({
+        color: 0xffffff,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.3,
+        transparent: true,
+        opacity: 0.8
+    });
+    humanCharacter = new THREE.Mesh(humanGeometry, humanMaterial);
+    humanCharacter.position.set(
+        Math.random() * 1000 - 500,
+        1525, // Human eye level
+        Math.random() * 1000 - 500
+    );
+    humanCharacter.userData = {
+        type: 'human',
+        speed: 3.0,
+        detectionRange: 200,
+        direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+        target: null,
+        eyeLevel: 1525
+    };
+    scene.add(humanCharacter);
+
+    // Owl: 1 foot = ~30cm = 300 units
+    // Flying bird
+    const owlGeometry = new THREE.SphereGeometry(15, 32, 32); // 1ft diameter
+    const owlMaterial = new THREE.MeshPhongMaterial({
+        color: 0x8B4513,
+        emissive: 0xff6600,
+        emissiveIntensity: 0.4,
+        transparent: true,
+        opacity: 0.9
+    });
+    owlCharacter = new THREE.Mesh(owlGeometry, owlMaterial);
+    owlCharacter.position.set(
+        Math.random() * 1000 - 500,
+        3000, // Flying height (3m)
+        Math.random() * 1000 - 500
+    );
+    owlCharacter.userData = {
+        type: 'owl',
+        speed: 5.0,
+        detectionRange: 300,
+        direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+        target: null,
+        eyeLevel: 3000
+    };
+    scene.add(owlCharacter);
+
+    // Mouse: 3 inches = ~7.5cm = 75 units
+    // Ground level rodent
+    const mouseGeometry = new THREE.SphereGeometry(4, 32, 32); // 3 inch diameter
+    const mouseMaterial = new THREE.MeshPhongMaterial({
+        color: 0x808080,
+        emissive: 0x404040,
+        emissiveIntensity: 0.3,
+        transparent: true,
+        opacity: 0.9
+    });
+    mouseCharacter = new THREE.Mesh(mouseGeometry, mouseMaterial);
+    mouseCharacter.position.set(
+        Math.random() * 1000 - 500,
+        37.5, // Ground level (3.75cm)
+        Math.random() * 1000 - 500
+    );
+    mouseCharacter.userData = {
+        type: 'mouse',
+        speed: 1.5,
+        detectionRange: 100,
+        direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+        target: null,
+        eyeLevel: 37.5
+    };
+    scene.add(mouseCharacter);
+
+    console.log('Game characters created: Human, Owl, Mouse');
+}
+
+// Update AI characters
+function updateAICharacters() {
+    if (!humanCharacter || !owlCharacter || !mouseCharacter) return;
+
+    const characters = [humanCharacter, owlCharacter, mouseCharacter];
+
+    characters.forEach(character => {
+        const data = character.userData;
+
+        // Check if being controlled by player (bird perspective controls owl)
+        const isPlayer = (currentPerspective === 'human' && character === humanCharacter) ||
+                        (currentPerspective === 'bird' && character === owlCharacter) ||
+                        (currentPerspective === 'mouse' && character === mouseCharacter);
+
+        if (isPlayer) {
+            // Player controls this character - sync with camera position
+            character.position.x = camera.position.x;
+            character.position.z = camera.position.z;
+            character.position.y = data.eyeLevel;
+        } else {
+            // AI controlled - roam and hunt
+
+            // Look for prey/threats
+            let closestTarget = null;
+            let closestDistance = Infinity;
+
+            characters.forEach(other => {
+                if (other === character) return;
+
+                const distance = character.position.distanceTo(other.position);
+
+                // Predator-prey logic
+                const canHunt = (
+                    (data.type === 'human' && other.userData.type === 'mouse') || // Human catches mouse
+                    (data.type === 'owl' && other.userData.type === 'mouse') ||   // Owl catches mouse
+                    (data.type === 'mouse' && other.userData.type === 'human')    // Mouse runs from human
+                );
+
+                if (canHunt && distance < data.detectionRange && distance < closestDistance) {
+                    closestTarget = other;
+                    closestDistance = distance;
+                }
+            });
+
+            // Move towards target or roam
+            if (closestTarget) {
+                // Chase/flee behavior
+                const direction = new THREE.Vector3().subVectors(closestTarget.position, character.position);
+                direction.y = 0; // Keep on horizontal plane
+                direction.normalize();
+
+                // Flee if mouse
+                if (data.type === 'mouse') {
+                    direction.multiplyScalar(-1);
+                }
+
+                data.direction.copy(direction);
+            } else {
+                // Random roaming - occasionally change direction
+                if (Math.random() < 0.02) {
+                    data.direction.set(
+                        Math.random() - 0.5,
+                        0,
+                        Math.random() - 0.5
+                    ).normalize();
+                }
+            }
+
+            // Move character
+            character.position.x += data.direction.x * data.speed;
+            character.position.z += data.direction.z * data.speed;
+
+            // Keep within bounds (-1000 to 1000)
+            character.position.x = Math.max(-1000, Math.min(1000, character.position.x));
+            character.position.z = Math.max(-1000, Math.min(1000, character.position.z));
+
+            // Check for catches
+            characters.forEach(other => {
+                if (other === character) return;
+
+                const distance = character.position.distanceTo(other.position);
+
+                if (distance < 50) { // Catch range
+                    const canCatch = (
+                        (data.type === 'human' && other.userData.type === 'mouse') ||
+                        (data.type === 'owl' && other.userData.type === 'mouse')
+                    );
+
+                    if (canCatch) {
+                        handleCatch(character, other);
+                    }
+                }
+            });
+        }
+    });
+}
+
+// Handle catch event
+function handleCatch(predator, prey) {
+    if (!gameState.gameActive) return;
+
+    console.log(`${predator.userData.type} caught ${prey.userData.type}!`);
+
+    // Update score
+    gameState.score += 10;
+    if (predator.userData.type === 'human') gameState.humanCaught++;
+    if (predator.userData.type === 'owl') gameState.owlCaught++;
+
+    // Update UI
+    document.getElementById('score').textContent = gameState.score;
+    document.getElementById('caught').textContent = gameState.humanCaught + gameState.owlCaught + gameState.mouseCaught;
+
+    // Respawn prey at random location
+    prey.position.set(
+        Math.random() * 1600 - 800,
+        prey.userData.eyeLevel,
+        Math.random() * 1600 - 800
+    );
+
+    // Show notification
+    showGameMessage(`${predator.userData.type.toUpperCase()} caught ${prey.userData.type}!`, 2000);
+}
+
+// Show game message
+function showGameMessage(message, duration = 2000) {
+    const statusDiv = document.getElementById('gameStatus');
+    const messageDiv = document.getElementById('statusMessage');
+    messageDiv.textContent = message;
+    statusDiv.style.display = 'block';
+
+    setTimeout(() => {
+        statusDiv.style.display = 'none';
+    }, duration);
 }
 
 function createMarkerSprite() {
