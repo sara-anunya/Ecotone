@@ -5,6 +5,7 @@ let scene, camera, renderer, controls, pointCloud;
 let currentData = [];
 let currentMaxZPercent = 100;
 let currentPerspective = 'human';
+let currentEyeLevel = 0;
 
 // Game entities - predator vs prey
 let humanCharacter, owlCharacter, mouseCharacter;
@@ -24,7 +25,7 @@ let gameState = {
 // Mouse: 2.5-5cm above ground - ground level
 const perspectiveSettings = {
     human: {
-        eyeLevel: 152.5,      // Average human eye level in cm (standing)
+        eyeLevel: 15.25,      // Average human eye level in cm (standing) / 10
         cursorSize: 40,       // Cursor size in pixels
         moveSpeed: 2.0,       // Medium walking speed (scaled to area)
         scrollSpeed: 2.0,     // Scroll/zoom speed
@@ -32,7 +33,7 @@ const perspectiveSettings = {
         description: 'Adult human standing eye level (152.5cm)'
     },
     bird: {
-        eyeLevel: 300,        // Bird flying height (~3m above ground) - HIGHEST
+        eyeLevel: 30,         // Bird flying height (~3m above ground) / 10 - HIGHEST
         cursorSize: 20,       // Medium cursor for bird
         moveSpeed: 4.0,       // Fastest movement (birds fly quickly)
         scrollSpeed: 4.0,     // Fastest scroll speed
@@ -40,7 +41,7 @@ const perspectiveSettings = {
         description: 'Small bird flying eye level (~3m high)'
     },
     mouse: {
-        eyeLevel: 3.75,       // Mouse eye level in cm (very low, 2.5-5cm avg) - GROUND LEVEL
+        eyeLevel: 0.375,      // Mouse eye level in cm (very low, 2.5-5cm avg) / 10 - GROUND LEVEL
         cursorSize: 15,       // Small cursor for mouse
         moveSpeed: 1.0,       // Slowest movement (small animals)
         scrollSpeed: 1.0,     // Slowest scroll speed
@@ -109,6 +110,9 @@ function init() {
     raycaster.params.Sprite = {}; // Enable sprite detection
     mouse = new THREE.Vector2();
 
+    // Initialize eye level to human default
+    currentEyeLevel = perspectiveSettings['human'].eyeLevel;
+
     // Note: Don't call updatePerspective here - it will be called after data loads
 
     // Lights
@@ -117,14 +121,6 @@ function init() {
 
     // Handle window resize
     window.addEventListener('resize', onWindowResize);
-
-    // Radio button listeners
-    const radios = document.querySelectorAll('input[name="dataset"]');
-    radios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            loadData(e.target.value);
-        });
-    });
 
     // Max Z slider listener
     const maxZSlider = document.getElementById('maxZSlider');
@@ -135,6 +131,15 @@ function init() {
         if (currentData.length > 0) {
             visualizeData(currentData);
         }
+    });
+
+    // Eye level slider listener
+    const eyeLevelSlider = document.getElementById('eyeLevelSlider');
+    const eyeLevelValue = document.getElementById('eyeLevelValue');
+    eyeLevelSlider.addEventListener('input', (e) => {
+        currentEyeLevel = parseFloat(e.target.value);
+        eyeLevelValue.textContent = currentEyeLevel.toFixed(2);
+        updateCameraHeight();
     });
 
     // Perspective radio button listeners
@@ -298,12 +303,29 @@ function updatePerspective(perspective) {
     currentPerspective = perspective;
     const settings = perspectiveSettings[perspective];
 
+    // Set eye level to the animal's default
+    currentEyeLevel = settings.eyeLevel;
+    const eyeLevelSlider = document.getElementById('eyeLevelSlider');
+    const eyeLevelValue = document.getElementById('eyeLevelValue');
+    if (eyeLevelSlider) {
+        eyeLevelSlider.value = currentEyeLevel;
+        eyeLevelValue.textContent = currentEyeLevel.toFixed(2);
+    }
+
+    updateCameraHeight();
+
+    // Update cursor size
+    const cursor = document.getElementById('cursor');
+    cursor.style.width = settings.cursorSize + 'px';
+    cursor.style.height = settings.cursorSize + 'px';
+
+    console.log(`Switched to ${perspective} perspective:`, settings.description);
+}
+
+function updateCameraHeight() {
     // Calculate eye level in scene coordinates
-    // The point cloud height axis (Y) needs proper scaling
-    // Based on the data normalization, we calculate the proper scale
-    // The height should be proportional to the actual eye level differences
-    const sceneHeightScale = 10; // Adjusted scale factor for better visibility
-    const eyeLevelHeight = settings.eyeLevel * sceneHeightScale;
+    const sceneHeightScale = 10; // Scale factor for better visibility
+    const eyeLevelHeight = currentEyeLevel * sceneHeightScale;
 
     // Store current position
     const currentX = camera.position.x;
@@ -326,13 +348,7 @@ function updatePerspective(perspective) {
     lookAtPoint.y = eyeLevelHeight; // Same height as camera for locked horizontal view
     camera.lookAt(lookAtPoint);
 
-    // Update cursor size
-    const cursor = document.getElementById('cursor');
-    cursor.style.width = settings.cursorSize + 'px';
-    cursor.style.height = settings.cursorSize + 'px';
-
-    console.log(`Switched to ${perspective} perspective:`, settings.description);
-    console.log(`Eye level height in scene: ${eyeLevelHeight.toFixed(2)} units`);
+    console.log(`Eye level: ${currentEyeLevel.toFixed(2)} | Scene height: ${eyeLevelHeight.toFixed(2)} units`);
     console.log(`Camera position: (${currentX.toFixed(2)}, ${eyeLevelHeight.toFixed(2)}, ${currentZ.toFixed(2)})`);
 }
 
@@ -356,7 +372,7 @@ function animate() {
 
 function handleMovement() {
     const settings = perspectiveSettings[currentPerspective];
-    const eyeLevelHeight = settings.eyeLevel * 10; // Same scale as updatePerspective
+    const eyeLevelHeight = currentEyeLevel * 10; // Same scale as updateCameraHeight
     const currentMoveSpeed = settings.moveSpeed; // Use animal-specific speed
     const zoomSpeed = settings.scrollSpeed * 1.5; // Zoom is faster than regular movement
 

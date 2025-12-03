@@ -1,0 +1,121 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background-color: #0a0a0a;
+    cursor: none;
+}
+
+#container {
+    width: 100%;
+    height: 100%;
+}
+
+.controls {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    background-color: rgba(42, 42, 42, 0.9);
+    padding: 15px;
+    border-radius: 8px;
+    min-width: 250px;
+}
+
+.controls label {
+    color: #fff;
+    font-size: 14px;
+    display: block;
+    margin-bottom: 10px;
+}
+
+.controls label:last-child {
+    margin-bottom: 0;
+}
+
+.controls span {
+    display: inline-block;
+    width: 65px;
+    text-align: right;
+}
+
+.controls input[type="range"] {
+    width: 100%;
+    margin-top: 8px;
+    cursor: pointer;
+}
+
+.perspective-controls {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background-color: rgba(42, 42, 42, 0.9);
+    padding: 15px;
+    border-radius: 8px;
+    display: flex;
+    gap: 15px;
+}
+
+.perspective-controls label {
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
+}
+
+.perspective-controls input[type="radio"] {
+    cursor: pointer;
+}
+
+#cursor {
+    position: fixed;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 9999;
+    transition: width 0.3s, height 0.3s, border-color 0.1s, background-color 0.1s;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+#info {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background-color: rgba(42, 42, 42, 0.9);
+    padding: 10px 15px;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 12px;
+    max-width: 300px;
+}
+
+#info a {
+    color: #6cb7ff;
+    text-decoration: none;
+}
+
+#info a:hover {
+    text-decoration: underline;
+}
+
+#gameStatus {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(42, 42, 42, 0.95);
+    padding: 30px;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 18px;
+    text-align: center;
+    display: none;
+    z-index: 10000;
+}
