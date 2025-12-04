@@ -1381,6 +1381,64 @@ function updateAICharacters() {
         mouse.position.x = Math.max(-1000, Math.min(1000, mouse.position.x));
         mouse.position.z = Math.max(-1000, Math.min(1000, mouse.position.z));
         
+        // Confine mice to within 30 units of point cloud periphery
+        if (originalPositions) {
+            const maxDistance = 30;
+            let nearestPointDist = Infinity;
+            
+            // Find distance to nearest point in cloud
+            for (let i = 0; i < originalPositions.length / 3; i++) {
+                const idx = i * 3;
+                const px = originalPositions[idx];
+                const py = originalPositions[idx + 1];
+                const pz = originalPositions[idx + 2];
+                
+                const dx = px - mouse.position.x;
+                const dy = py - mouse.position.y;
+                const dz = pz - mouse.position.z;
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                
+                if (dist < nearestPointDist) {
+                    nearestPointDist = dist;
+                }
+            }
+            
+            // If mouse is too far from point cloud, redirect toward it
+            if (nearestPointDist > maxDistance) {
+                // Find nearest point to move toward
+                let nearestX = 0, nearestY = 0, nearestZ = 0;
+                nearestPointDist = Infinity;
+                
+                for (let i = 0; i < originalPositions.length / 3; i++) {
+                    const idx = i * 3;
+                    const px = originalPositions[idx];
+                    const py = originalPositions[idx + 1];
+                    const pz = originalPositions[idx + 2];
+                    
+                    const dx = px - mouse.position.x;
+                    const dy = py - mouse.position.y;
+                    const dz = pz - mouse.position.z;
+                    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    
+                    if (dist < nearestPointDist) {
+                        nearestPointDist = dist;
+                        nearestX = px;
+                        nearestY = py;
+                        nearestZ = pz;
+                    }
+                }
+                
+                // Redirect mouse toward nearest point
+                const dirToPoint = new THREE.Vector3(
+                    nearestX - mouse.position.x,
+                    0,
+                    nearestZ - mouse.position.z
+                ).normalize();
+                
+                mouseData.direction.copy(dirToPoint);
+            }
+        }
+        
         // Check if player is within 10 units of mouse (collectible)
         const distance = camera.position.distanceTo(mouse.position);
         if (distance < 10) {
@@ -1402,6 +1460,7 @@ function catchMouse(mouse) {
     
     console.log(`Barn owl caught a mouse! Total: ${gameState.miceCaught}`);
     updateMiceCounter();
+    updateScoreDisplay(); // Update score display for barn owl
 }
 
 // Update mice counter display
@@ -1459,7 +1518,10 @@ function updateScoreDisplay() {
     
     if (currentPerspective === 'mouse') {
         scoreDisplay.style.display = 'block';
-        scoreValue.textContent = gameState.cheeseCollected;
+        scoreDisplay.innerHTML = `Score: <span id="scoreValue">${gameState.cheeseCollected}</span>`;
+    } else if (currentPerspective === 'bird') {
+        scoreDisplay.style.display = 'block';
+        scoreDisplay.innerHTML = `Mice Caught: <span id="scoreValue">${gameState.miceCaught}</span>`;
     } else {
         scoreDisplay.style.display = 'none';
     }
