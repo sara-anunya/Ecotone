@@ -33,14 +33,25 @@
     </div>
     <div id="info">
         <strong>Navigation:</strong><br>
-        • Move cursor to screen edges to rotate view<br>
-        • Scroll to move forward/backward (Human/Mouse)<br>
-        • Barn Owl: auto-flies toward crosshair<br>
-        • Spacebar: toggle between perspectives<br>
-        <strong>Score:</strong> <span id="score">0</span> | <strong>Caught:</strong> <span id="caught">0</span>
+        <span id="navInstructions"></span>
+        <strong><span id="counterLabel">Mice Caught:</span></strong> <span id="caught">0/3</span>
     </div>
     <div id="gameStatus">
         <div id="statusMessage"></div>
+    </div>
+    <div id="videoContainer">
+        <iframe id="barnOwlVideo" 
+                src="https://www.youtube.com/embed/hlKo42iPslg?start=24&autoplay=1&mute=1&loop=1&playlist=hlKo42iPslg" 
+                frameborder="0" 
+                allow="autoplay; encrypted-media" 
+                allowfullscreen>
+        </iframe>
+        <iframe id="mouseVideo" 
+                src="https://www.youtube.com/embed/l70UhhNalqA?autoplay=1&mute=1&loop=1&playlist=l70UhhNalqA" 
+                frameborder="0" 
+                allow="autoplay; encrypted-media" 
+                allowfullscreen>
+        </iframe>
     </div>
     <script type="importmap">
     {

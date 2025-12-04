@@ -7,14 +7,19 @@ let currentMaxZPercent = 100;
 let currentPerspective = 'human';
 let currentEyeLevel = 0;
 let targetCameraHeight = 0; // For smooth height transitions
+let originalPositions = null; // Store original point positions for displacement effect
+let originalColors = null; // Store original point colors
+let touchedByAnimal = null; // Track which animal touched each point (0=none, 1=mouse, 2=owl)
 
 // Game entities - predator vs prey
-let humanCharacter, owlCharacter, mouseCharacter;
+let falconCharacter = null;
+let barnOwlCharacters = []; // Random number of barn owls
+let miceCharacters = []; // Exactly 3 mice (moving, for human/owl to catch)
+let cheeseItems = []; // Exactly 10 cheese pieces (stationary, for mouse to collect)
 let gameState = {
-    score: 0,
-    humanCaught: 0,
-    owlCaught: 0,
-    mouseCaught: 0,
+    miceCaught: 0,
+    cheeseCollected: 0,
+    falconChasing: false,
     gameActive: true
 };
 
@@ -34,6 +39,8 @@ const perspectiveSettings = {
         fov: 75,              // Field of view
         terrainFollow: true,  // Follows terrain contours like mouse
         terrainOffset: 30,   // 5.75 feet = 5.75 * 30.48cm / 10 * 10 scale = .26 units above nearest point
+        sphereRadius: 0,      // No point pushing for humans
+        worldScale: 1.0,      // Normal scale (baseline)
         description: 'Adult human standing eye level (5.75 feet above ground)'
     },
     bird: {
@@ -44,6 +51,8 @@ const perspectiveSettings = {
         rotateSpeed: 1.0,     // Barn owls can turn faster
         fov: 110,             // Wide field of view for flying
         terrainFollow: false, // Maintains fixed altitude
+        sphereRadius: 20,    // Diameter 1.5, radius for point pushing
+        worldScale: 15.0,     // 15x scale (barn owl ~30cm tall, world appears much larger)
         description: 'Barn owl flying eye level (~3m high)'
     },
     mouse: {
@@ -55,6 +64,8 @@ const perspectiveSettings = {
         fov: 70,              // Wide field of view (prey animal)
         terrainFollow: true,  // Follows terrain contours
         terrainOffset: 30,    // 1 foot = 30cm / 10 = 3 units * 10 scale = 30 units above nearest point
+        sphereRadius: 5,    // Diameter 0.4, radius for point pushing
+        worldScale: 100.0,    // 100x scale (mouse ~7cm tall, world appears massive)
         description: 'Mouse eye level (3.75cm from ground)'
     }
 };
@@ -80,11 +91,12 @@ const iNaturalistData = [
 
 let raycaster, mouse, linkedPoints = [];
 let linkedPointMarkers = [];
-let keys = { forward: false, backward: false, zoomIn: false, zoomOut: false };
+let keys = { forward: false, backward: false, rotateLeft: false, rotateRight: false, rotateUp: false, rotateDown: false };
 let mouseX = 0.5; // Normalized mouse X position (0 to 1)
 let mouseY = 0.5; // Normalized mouse Y position (0 to 1)
 let cameraRotationY = 0; // Horizontal rotation (yaw)
 let cameraRotationX = 0; // Vertical rotation (pitch)
+let barnOwlMoving = true; // Toggle for barn owl automatic movement
 
 function init() {
     // Scene
@@ -213,19 +225,41 @@ function init() {
     document.addEventListener('keydown', (e) => {
         switch(e.key) {
             case 'ArrowUp':
+                keys.rotateUp = true;
+                e.preventDefault();
+                break;
+            case 'ArrowDown':
+                keys.rotateDown = true;
+                e.preventDefault();
+                break;
+            case 'ArrowLeft':
+                keys.rotateLeft = true;
+                e.preventDefault();
+                break;
+            case 'ArrowRight':
+                keys.rotateRight = true;
+                e.preventDefault();
+                break;
             case 'w':
             case 'W':
                 keys.forward = true;
                 e.preventDefault();
                 break;
-            case 'ArrowDown':
             case 's':
             case 'S':
                 keys.backward = true;
                 e.preventDefault();
                 break;
             case ' ':
-                // Spacebar - toggle perspective
+                // Spacebar - toggle barn owl movement
+                if (currentPerspective === 'bird') {
+                    barnOwlMoving = !barnOwlMoving;
+                    console.log(`Barn owl movement: ${barnOwlMoving ? 'ON' : 'OFF'}`);
+                }
+                e.preventDefault();
+                break;
+            case 'Enter':
+                // Enter - toggle perspective
                 togglePerspective();
                 e.preventDefault();
                 break;
@@ -235,11 +269,21 @@ function init() {
     document.addEventListener('keyup', (e) => {
         switch(e.key) {
             case 'ArrowUp':
+                keys.rotateUp = false;
+                break;
+            case 'ArrowDown':
+                keys.rotateDown = false;
+                break;
+            case 'ArrowLeft':
+                keys.rotateLeft = false;
+                break;
+            case 'ArrowRight':
+                keys.rotateRight = false;
+                break;
             case 'w':
             case 'W':
                 keys.forward = false;
                 break;
-            case 'ArrowDown':
             case 's':
             case 'S':
                 keys.backward = false;
@@ -249,6 +293,9 @@ function init() {
 
     // Start animation loop
     animate();
+    
+    // Set initial navigation instructions
+    updateNavigationInstructions();
 
     // Load initial data
     loadData('02.12_Pointcloud.csv.csv');
@@ -332,20 +379,72 @@ function updatePerspective(perspective) {
     // Update cursor size and crosshair visibility
     const cursor = document.getElementById('cursor');
     const crosshair = document.getElementById('crosshair');
+    const videoContainer = document.getElementById('videoContainer');
+    const barnOwlVideo = document.getElementById('barnOwlVideo');
+    const mouseVideo = document.getElementById('mouseVideo');
     cursor.style.width = settings.cursorSize + 'px';
     cursor.style.height = settings.cursorSize + 'px';
     
-    // Show crosshair for barn owl, hide cursor; hide crosshair for others
+    // Show crosshair and owl video for barn owl, show mouse video for mouse, hide for human
     if (currentPerspective === 'bird') {
         crosshair.style.display = 'block';
         cursor.style.display = 'none';
+        videoContainer.style.display = 'block';
+        barnOwlVideo.style.display = 'block';
+        mouseVideo.style.display = 'none';
+    } else if (currentPerspective === 'mouse') {
+        crosshair.style.display = 'none';
+        cursor.style.display = 'block';
+        videoContainer.style.display = 'block';
+        barnOwlVideo.style.display = 'none';
+        mouseVideo.style.display = 'block';
     } else {
         crosshair.style.display = 'none';
         cursor.style.display = 'block';
+        videoContainer.style.display = 'none';
+        barnOwlVideo.style.display = 'none';
+        mouseVideo.style.display = 'none';
+    }
+
+    // Update navigation instructions
+    updateNavigationInstructions();
+    
+    // Hide falcon alert if switching away from bird perspective
+    if (perspective !== 'bird') {
+        hideFalconAlert();
     }
 
     console.log(`Switched to ${perspective} perspective:`, settings.description);
     console.log(`FOV: ${settings.fov}°, Cursor: ${settings.cursorSize}px, Speed: ${settings.moveSpeed}`);
+}
+
+function updateNavigationInstructions() {
+    const navInstructions = document.getElementById('navInstructions');
+    const counterLabel = document.getElementById('counterLabel');
+    if (!navInstructions) return;
+    
+    let instructions = '';
+    
+    if (currentPerspective === 'human') {
+        instructions = '• Move cursor to screen edges to rotate view<br>' +
+                      '• Scroll to move forward/backward<br>' +
+                      '• Enter: toggle between animals<br>';
+        if (counterLabel) counterLabel.textContent = 'Mice Caught:';
+    } else if (currentPerspective === 'bird') {
+        instructions = '• Auto-flies toward crosshair at center<br>' +
+                      '• Move cursor to screen edges to rotate view<br>' +
+                      '• Spacebar: stop/resume movement<br>' +
+                      '• Enter: toggle between animals<br>';
+        if (counterLabel) counterLabel.textContent = 'Mice Caught:';
+    } else if (currentPerspective === 'mouse') {
+        instructions = '• Move cursor to screen edges to rotate view<br>' +
+                      '• Scroll to move forward/backward<br>' +
+                      '• Enter: toggle between animals<br>';
+        if (counterLabel) counterLabel.textContent = 'Cheese Collected:';
+    }
+    
+    navInstructions.innerHTML = instructions;
+    updateMiceCounter();
 }
 
 function updateCameraHeight() {
@@ -361,18 +460,19 @@ function updateCameraHeight() {
 }
 
 function getTerrainHeightAtPosition(x, z) {
-    if (!pointCloud || !pointCloud.geometry) return null;
+    if (!pointCloud || !pointCloud.geometry || !originalPositions) return null;
     
-    const positions = pointCloud.geometry.attributes.position;
+    // Use original positions for terrain detection to avoid conflict with point pushing
     const searchRadius = 100; // Search within this radius
     let nearestHeight = null;
     let minDistance = Infinity;
     
-    // Search for nearest point within radius
-    for (let i = 0; i < positions.count; i++) {
-        const px = positions.getX(i);
-        const py = positions.getY(i); // Y is height in our coordinate system
-        const pz = positions.getZ(i);
+    // Search for nearest point within radius using ORIGINAL positions
+    for (let i = 0; i < originalPositions.length / 3; i++) {
+        const idx = i * 3;
+        const px = originalPositions[idx];
+        const py = originalPositions[idx + 1]; // Y is height in our coordinate system
+        const pz = originalPositions[idx + 2];
         
         // Calculate horizontal distance only
         const dx = px - x;
@@ -405,6 +505,9 @@ function animate() {
     
     // Update fog for mouse perspective
     updateMouseVisibility();
+    
+    // Push points away from camera sphere
+    pushPointsAway();
 
     renderer.render(scene, camera);
 }
@@ -448,9 +551,9 @@ function handleMovement() {
 
     // Edge-based rotation: cursor near screen edges rotates camera
     const edgeThreshold = 0.15; // 15% from edge triggers rotation
-    const rotationSpeed = settings.rotateSpeed * 0.03; // Rotation speed
+    const rotationSpeed = settings.rotateSpeed * 0.015; // Rotation speed (reduced from 0.03)
     
-    // Horizontal rotation (left/right)
+    // Horizontal rotation (left/right) - cursor edges
     if (mouseX < edgeThreshold) {
         // Near left edge - rotate left
         const intensity = (edgeThreshold - mouseX) / edgeThreshold;
@@ -461,7 +564,7 @@ function handleMovement() {
         cameraRotationY -= rotationSpeed * intensity;
     }
     
-    // Vertical rotation (up/down)
+    // Vertical rotation (up/down) - cursor edges
     if (mouseY < edgeThreshold) {
         // Near top edge - look up
         const intensity = (edgeThreshold - mouseY) / edgeThreshold;
@@ -472,6 +575,21 @@ function handleMovement() {
         cameraRotationX -= rotationSpeed * intensity * 0.5;
     }
     
+    // Arrow key rotation controls
+    const keyRotationSpeed = settings.rotateSpeed * 0.025; // Arrow key rotation (reduced from 0.05)
+    if (keys.rotateLeft) {
+        cameraRotationY += keyRotationSpeed;
+    }
+    if (keys.rotateRight) {
+        cameraRotationY -= keyRotationSpeed;
+    }
+    if (keys.rotateUp) {
+        cameraRotationX += keyRotationSpeed * 0.5; // Half speed for vertical
+    }
+    if (keys.rotateDown) {
+        cameraRotationX -= keyRotationSpeed * 0.5;
+    }
+    
     // Clamp vertical rotation to prevent over-rotation
     cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
     
@@ -480,8 +598,8 @@ function handleMovement() {
     camera.rotation.y = cameraRotationY;
     camera.rotation.x = cameraRotationX;
 
-    // Barn owl: continuously moves forward (default state)
-    if (currentPerspective === 'bird') {
+    // Barn owl: continuously moves forward (default state, unless stopped)
+    if (currentPerspective === 'bird' && barnOwlMoving) {
         camera.position.addScaledVector(forward, currentMoveSpeed);
     }
 
@@ -501,14 +619,23 @@ function handleMovement() {
         } else {
             targetCameraHeight = eyeLevelHeight;
         }
-        // Smooth interpolation (lerp) for Y-axis - 0.05 = smoothing factor (lower = smoother)
+        // Smooth interpolation (lerp) for Y-axis - 0.01 = smoothing factor (lower = smoother)
         camera.position.y += (targetCameraHeight - camera.position.y) * 0.05;
     } else if (currentPerspective !== 'bird') {
         // Lock the Y position to eye level (no vertical movement) - but NOT for bird
         camera.position.y = eyeLevelHeight;
         targetCameraHeight = eyeLevelHeight;
+    } else if (currentPerspective === 'bird' && pointCloud) {
+        // Bird perspective: enforce lower limit based on terrain height
+        const terrainHeight = getTerrainHeightAtPosition(camera.position.x, camera.position.z);
+        if (terrainHeight !== null) {
+            // Don't allow barn owl to go below the lowest point in the area
+            const minHeight = terrainHeight;
+            if (camera.position.y < minHeight) {
+                camera.position.y = minHeight;
+            }
+        }
     }
-    // Bird perspective: Y position is controlled by 3D movement direction, no override
 }
 
 function animateLinkedMarkers() {
@@ -518,6 +645,102 @@ function animateLinkedMarkers() {
         const scale = 1 + Math.sin(time + index) * 0.3;
         marker.scale.set(scale, scale, 1);
     });
+}
+
+function pushPointsAway() {
+    if (!pointCloud || !originalPositions || !originalColors || !touchedByAnimal) return;
+    
+    const settings = perspectiveSettings[currentPerspective];
+    const sphereRadius = settings.sphereRadius;
+    
+    // Skip point pushing if sphereRadius is 0 or undefined
+    if (!sphereRadius || sphereRadius === 0) return;
+    
+    const positions = pointCloud.geometry.attributes.position;
+    const colors = pointCloud.geometry.attributes.color;
+    const cameraPos = camera.position;
+    
+    // Define tint colors
+    const mouseTint = { r: 1.0, g: 1.0, b: 0.0 }; // Yellow for mouse
+    const owlTint = { r: 0.6, g: 0.4, b: 0.2 }; // Brown for barn owl
+    const tintStrength = 0.5; // How much to blend with original color
+    
+    // Iterate through all points
+    for (let i = 0; i < positions.count; i++) {
+        const idx = i * 3;
+        
+        // Get original position
+        const origX = originalPositions[idx];
+        const origY = originalPositions[idx + 1];
+        const origZ = originalPositions[idx + 2];
+        
+        // Calculate distance from camera to original point position
+        const dx = origX - cameraPos.x;
+        const dy = origY - cameraPos.y;
+        const dz = origZ - cameraPos.z;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        // If point is inside sphere, push it away and mark it as touched
+        if (distance < sphereRadius) {
+            // Mark point as touched by current animal
+            if (currentPerspective === 'mouse' && touchedByAnimal[i] === 0) {
+                touchedByAnimal[i] = 1; // Mouse touched
+            } else if (currentPerspective === 'bird' && touchedByAnimal[i] === 0) {
+                touchedByAnimal[i] = 2; // Owl touched
+            }
+            
+            if (distance > 0.001) { // Avoid division by zero
+                // Calculate push direction (normalized)
+                const pushX = dx / distance;
+                const pushY = dy / distance;
+                const pushZ = dz / distance;
+                
+                // Push point to sphere surface
+                const pushAmount = sphereRadius - distance;
+                positions.setXYZ(
+                    i,
+                    origX + pushX * pushAmount,
+                    origY + pushY * pushAmount,
+                    origZ + pushZ * pushAmount
+                );
+            }
+        } else {
+            // Point is outside sphere, restore to original position
+            positions.setXYZ(i, origX, origY, origZ);
+        }
+        
+        // Apply color tint based on which animal touched it
+        const origR = originalColors[idx];
+        const origG = originalColors[idx + 1];
+        const origB = originalColors[idx + 2];
+        
+        if (touchedByAnimal[i] === 1) {
+            // Mouse touched - tint yellow
+            colors.setXYZ(
+                i,
+                origR * (1 - tintStrength) + mouseTint.r * tintStrength,
+                origG * (1 - tintStrength) + mouseTint.g * tintStrength,
+                origB * (1 - tintStrength) + mouseTint.b * tintStrength
+            );
+        } else if (touchedByAnimal[i] === 2) {
+            // Owl touched - tint brown
+            colors.setXYZ(
+                i,
+                origR * (1 - tintStrength) + owlTint.r * tintStrength,
+                origG * (1 - tintStrength) + owlTint.g * tintStrength,
+                origB * (1 - tintStrength) + owlTint.b * tintStrength
+            );
+        } else {
+            // Not touched - keep original color
+            colors.setXYZ(i, origR, origG, origB);
+        }
+    }
+    
+    // Mark colors as needing update
+    colors.needsUpdate = true;
+    
+    // Mark positions as needing update
+    positions.needsUpdate = true;
 }
 
 function updateCursorColor() {
@@ -667,13 +890,12 @@ function visualizeData(data) {
     const maxRange = Math.max(rangeX, rangeY, rangeZ);
     let scale = 2000 / maxRange; // Scale to fit in a 2000 unit cube
     
-    // Scale up by 10x for mouse perspective (makes world appear larger relative to small mouse)
-    if (currentPerspective === 'mouse') {
-        scale *= 10;
-    }
+    // Apply perspective-based world scale (smaller animals see a larger world)
+    const worldScale = perspectiveSettings[currentPerspective].worldScale;
+    scale *= worldScale;
 
     console.log(`Ranges: X=${rangeX}, Y=${rangeY}, Z=${rangeZ}`);
-    console.log(`Scale factor: ${scale} (${currentPerspective} perspective)`);
+    console.log(`Scale factor: ${scale} (worldScale: ${worldScale}x for ${currentPerspective})`);
 
     // Create geometry
     const geometry = new THREE.BufferGeometry();
@@ -708,6 +930,11 @@ function visualizeData(data) {
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    
+    // Store original positions and colors for displacement effect and tinting
+    originalPositions = new Float32Array(positions);
+    originalColors = new Float32Array(colors);
+    touchedByAnimal = new Uint8Array(data.length); // 0=none, 1=mouse, 2=owl
 
     // Create material - smaller points for larger datasets
     let pointSize = 12;
@@ -824,208 +1051,328 @@ function linkRandomPointsToiNaturalist(totalPoints) {
 
 // Create game character entities
 function createGameCharacters() {
-    // Human: 6 feet = ~183cm = 1830 units in our scale
-    // White blob at human eye level
-    const humanGeometry = new THREE.SphereGeometry(90, 32, 32); // 6ft diameter
-    const humanMaterial = new THREE.MeshPhongMaterial({
-        color: 0xffffff,
-        emissive: 0xffffff,
-        emissiveIntensity: 0.3,
-        transparent: true,
-        opacity: 0.8
-    });
-    humanCharacter = new THREE.Mesh(humanGeometry, humanMaterial);
-    humanCharacter.position.set(
-        Math.random() * 1000 - 500,
-        1525, // Human eye level
-        Math.random() * 1000 - 500
-    );
-    humanCharacter.userData = {
-        type: 'human',
-        speed: 3.0,
-        detectionRange: 200,
-        direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
-        target: null,
-        eyeLevel: 1525
-    };
-    scene.add(humanCharacter);
-
-    // Owl: 1 foot = ~30cm = 300 units
-    // Flying barn owl
-    const owlGeometry = new THREE.SphereGeometry(15, 32, 32); // 1ft diameter
-    const owlMaterial = new THREE.MeshPhongMaterial({
-        color: 0x8B4513,
-        emissive: 0xff6600,
-        emissiveIntensity: 0.4,
+    // Create Peregrine Falcon (red dot)
+    const falconGeometry = new THREE.SphereGeometry(20, 32, 32);
+    const falconMaterial = new THREE.MeshPhongMaterial({
+        color: 0xff0000,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.5,
         transparent: true,
         opacity: 0.9
     });
-    owlCharacter = new THREE.Mesh(owlGeometry, owlMaterial);
-    owlCharacter.position.set(
+    falconCharacter = new THREE.Mesh(falconGeometry, falconMaterial);
+    falconCharacter.position.set(
         Math.random() * 1000 - 500,
-        3000, // Flying height (3m)
+        4000, // Higher flying height
         Math.random() * 1000 - 500
     );
-    owlCharacter.userData = {
-        type: 'owl',
-        speed: 5.0,
-        detectionRange: 300,
+    falconCharacter.userData = {
+        type: 'falcon',
+        speed: 8.0,
+        detectionRange: 500,
         direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
         target: null,
-        eyeLevel: 3000
+        chaseTimer: 0,
+        chaseInterval: Math.random() * 300 + 200 // Random interval between chases
     };
-    scene.add(owlCharacter);
+    scene.add(falconCharacter);
 
-    // Mouse: 3 inches = ~7.5cm = 75 units
-    // Ground level rodent
-    const mouseGeometry = new THREE.SphereGeometry(4, 32, 32); // 3 inch diameter
-    const mouseMaterial = new THREE.MeshPhongMaterial({
-        color: 0x808080,
-        emissive: 0x404040,
-        emissiveIntensity: 0.3,
-        transparent: true,
-        opacity: 0.9
-    });
-    mouseCharacter = new THREE.Mesh(mouseGeometry, mouseMaterial);
-    mouseCharacter.position.set(
-        Math.random() * 1000 - 500,
-        37.5, // Ground level (3.75cm)
-        Math.random() * 1000 - 500
-    );
-    mouseCharacter.userData = {
-        type: 'mouse',
-        speed: 1.5,
-        detectionRange: 100,
-        direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
-        target: null,
-        eyeLevel: 37.5
-    };
-    scene.add(mouseCharacter);
+    // Create random number of Barn Owls (black dots - will be visible only in barn owl mode)
+    const numOwls = Math.floor(Math.random() * 5) + 3; // 3-7 barn owls
+    for (let i = 0; i < numOwls; i++) {
+        const owlGeometry = new THREE.SphereGeometry(15, 32, 32);
+        const owlMaterial = new THREE.MeshPhongMaterial({
+            color: 0x000000,
+            emissive: 0x333333,
+            emissiveIntensity: 0.3,
+            transparent: true,
+            opacity: 0.9
+        });
+        const owl = new THREE.Mesh(owlGeometry, owlMaterial);
+        owl.position.set(
+            Math.random() * 1000 - 500,
+            3000,
+            Math.random() * 1000 - 500
+        );
+        owl.userData = {
+            type: 'barnowl',
+            speed: 5.0,
+            direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize()
+        };
+        owl.visible = false; // Only visible in barn owl mode
+        barnOwlCharacters.push(owl);
+        scene.add(owl);
+    }
 
-    console.log('Game characters created: Human, Owl, Mouse');
+    // Create exactly 3 Mice (yellow dots)
+    for (let i = 0; i < 3; i++) {
+        const mouseGeometry = new THREE.SphereGeometry(4, 32, 32);
+        const mouseMaterial = new THREE.MeshPhongMaterial({
+            color: 0xffff00,
+            emissive: 0xffff00,
+            emissiveIntensity: 0.5,
+            transparent: true,
+            opacity: 0.9
+        });
+        const mouse = new THREE.Mesh(mouseGeometry, mouseMaterial);
+        mouse.position.set(
+            Math.random() * 1000 - 500,
+            37.5,
+            Math.random() * 1000 - 500
+        );
+        mouse.userData = {
+            type: 'mouse',
+            direction: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
+            alive: true
+        };
+        miceCharacters.push(mouse);
+        scene.add(mouse);
+    }
+
+    // Create exactly 10 Cheese pieces (yellow dots, stationary, for mouse perspective)
+    for (let i = 0; i < 10; i++) {
+        const cheeseGeometry = new THREE.SphereGeometry(5, 32, 32);
+        const cheeseMaterial = new THREE.MeshPhongMaterial({
+            color: 0xffff00,
+            emissive: 0xffff00,
+            emissiveIntensity: 0.6,
+            transparent: true,
+            opacity: 0.95
+        });
+        const cheese = new THREE.Mesh(cheeseGeometry, cheeseMaterial);
+        cheese.position.set(
+            Math.random() * 1000 - 500,
+            37.5, // Ground level
+            Math.random() * 1000 - 500
+        );
+        cheese.userData = {
+            type: 'cheese',
+            collected: false
+        };
+        cheese.visible = false; // Only visible in mouse mode
+        cheeseItems.push(cheese);
+        scene.add(cheese);
+    }
+
+    console.log(`Game characters created: Falcon, ${numOwls} Barn Owls, 3 Mice, 10 Cheese`);
 }
 
 // Update AI characters
 function updateAICharacters() {
-    if (!humanCharacter || !owlCharacter || !mouseCharacter) return;
+    if (!falconCharacter || barnOwlCharacters.length === 0 || miceCharacters.length === 0) return;
 
-    const characters = [humanCharacter, owlCharacter, mouseCharacter];
+    // Get mouse speed from perspective settings
+    const mouseSpeed = perspectiveSettings.mouse.moveSpeed;
 
-    characters.forEach(character => {
-        const data = character.userData;
-
-        // Check if being controlled by player (barn owl perspective controls owl)
-        const isPlayer = (currentPerspective === 'human' && character === humanCharacter) ||
-                        (currentPerspective === 'bird' && character === owlCharacter) ||
-                        (currentPerspective === 'mouse' && character === mouseCharacter);
-
-        if (isPlayer) {
-            // Player controls this character - sync with camera position
-            character.position.x = camera.position.x;
-            character.position.z = camera.position.z;
-            character.position.y = data.eyeLevel;
-        } else {
-            // AI controlled - roam and hunt
-
-            // Look for prey/threats
-            let closestTarget = null;
-            let closestDistance = Infinity;
-
-            characters.forEach(other => {
-                if (other === character) return;
-
-                const distance = character.position.distanceTo(other.position);
-
-                // Predator-prey logic
-                const canHunt = (
-                    (data.type === 'human' && other.userData.type === 'mouse') || // Human catches mouse
-                    (data.type === 'owl' && other.userData.type === 'mouse') ||   // Owl catches mouse
-                    (data.type === 'mouse' && other.userData.type === 'human')    // Mouse runs from human
-                );
-
-                if (canHunt && distance < data.detectionRange && distance < closestDistance) {
-                    closestTarget = other;
-                    closestDistance = distance;
-                }
-            });
-
-            // Move towards target or roam
-            if (closestTarget) {
-                // Chase/flee behavior
-                const direction = new THREE.Vector3().subVectors(closestTarget.position, character.position);
-                direction.y = 0; // Keep on horizontal plane
-                direction.normalize();
-
-                // Flee if mouse
-                if (data.type === 'mouse') {
-                    direction.multiplyScalar(-1);
-                }
-
-                data.direction.copy(direction);
-            } else {
-                // Random roaming - occasionally change direction
-                if (Math.random() < 0.02) {
-                    data.direction.set(
-                        Math.random() - 0.5,
-                        0,
-                        Math.random() - 0.5
-                    ).normalize();
-                }
+    // Update barn owl visibility based on current perspective
+    barnOwlCharacters.forEach(owl => {
+        owl.visible = (currentPerspective === 'bird');
+    });
+    
+    // Update mice visibility - only visible in human and barn owl perspectives
+    miceCharacters.forEach(mouse => {
+        mouse.visible = (currentPerspective === 'human' || currentPerspective === 'bird');
+    });
+    
+    // Update cheese visibility - only visible in mouse perspective
+    cheeseItems.forEach(cheese => {
+        cheese.visible = (currentPerspective === 'mouse' && !cheese.userData.collected);
+    });
+    
+    // Check if mouse player collects cheese
+    if (currentPerspective === 'mouse') {
+        cheeseItems.forEach(cheese => {
+            if (cheese.userData.collected) return;
+            
+            const distance = camera.position.distanceTo(cheese.position);
+            if (distance < 10) {
+                collectCheese(cheese);
             }
+        });
+    }
 
-            // Move character
-            character.position.x += data.direction.x * data.speed;
-            character.position.z += data.direction.z * data.speed;
+    // Update Falcon behavior
+    const falconData = falconCharacter.userData;
+    falconData.chaseTimer++;
+    
+    // Periodically chase a random barn owl
+    if (falconData.chaseTimer > falconData.chaseInterval) {
+        if (!gameState.falconChasing) {
+            // Start chasing
+            gameState.falconChasing = true;
+            falconData.target = barnOwlCharacters[Math.floor(Math.random() * barnOwlCharacters.length)];
+            falconData.chaseTimer = 0;
+            falconData.chaseDuration = Math.random() * 200 + 100; // Chase for 100-300 frames
+            showFalconAlert();
+        }
+    }
+    
+    if (gameState.falconChasing && falconData.target) {
+        // Chase the barn owl
+        const direction = new THREE.Vector3().subVectors(falconData.target.position, falconCharacter.position);
+        direction.y = 0;
+        direction.normalize();
+        falconData.direction.copy(direction);
+        
+        // Stop chasing after duration
+        if (falconData.chaseTimer > falconData.chaseDuration) {
+            gameState.falconChasing = false;
+            falconData.target = null;
+            falconData.chaseTimer = 0;
+            falconData.chaseInterval = Math.random() * 300 + 200;
+            hideFalconAlert();
+        }
+    } else {
+        // Random roaming
+        if (Math.random() < 0.02) {
+            falconData.direction.set(
+                Math.random() - 0.5,
+                0,
+                Math.random() - 0.5
+            ).normalize();
+        }
+    }
+    
+    falconCharacter.position.x += falconData.direction.x * falconData.speed;
+    falconCharacter.position.z += falconData.direction.z * falconData.speed;
+    falconCharacter.position.x = Math.max(-1000, Math.min(1000, falconCharacter.position.x));
+    falconCharacter.position.z = Math.max(-1000, Math.min(1000, falconCharacter.position.z));
 
-            // Keep within bounds (-1000 to 1000)
-            character.position.x = Math.max(-1000, Math.min(1000, character.position.x));
-            character.position.z = Math.max(-1000, Math.min(1000, character.position.z));
+    // Update Barn Owls (random roaming)
+    barnOwlCharacters.forEach(owl => {
+        const owlData = owl.userData;
+        
+        if (Math.random() < 0.02) {
+            owlData.direction.set(
+                Math.random() - 0.5,
+                0,
+                Math.random() - 0.5
+            ).normalize();
+        }
+        
+        owl.position.x += owlData.direction.x * owlData.speed;
+        owl.position.z += owlData.direction.z * owlData.speed;
+        owl.position.x = Math.max(-1000, Math.min(1000, owl.position.x));
+        owl.position.z = Math.max(-1000, Math.min(1000, owl.position.z));
+    });
 
-            // Check for catches
-            characters.forEach(other => {
-                if (other === character) return;
-
-                const distance = character.position.distanceTo(other.position);
-
-                if (distance < 50) { // Catch range
-                    const canCatch = (
-                        (data.type === 'human' && other.userData.type === 'mouse') ||
-                        (data.type === 'owl' && other.userData.type === 'mouse')
-                    );
-
-                    if (canCatch) {
-                        handleCatch(character, other);
-                    }
-                }
-            });
+    // Update Mice (use exact mouse perspective movement rules)
+    miceCharacters.forEach(mouse => {
+        if (!mouse.userData.alive) return;
+        
+        const mouseData = mouse.userData;
+        const mouseSettings = perspectiveSettings.mouse;
+        
+        // Random direction changes (same behavior as AI mouse)
+        if (Math.random() < 0.03) {
+            mouseData.direction.set(
+                Math.random() - 0.5,
+                0,
+                Math.random() - 0.5
+            ).normalize();
+        }
+        
+        // Use the exact same moveSpeed as mouse perspective (not scrollSpeed)
+        // This matches the handleMovement() function for mouse perspective
+        mouse.position.x += mouseData.direction.x * mouseSettings.moveSpeed;
+        mouse.position.z += mouseData.direction.z * mouseSettings.moveSpeed;
+        mouse.position.x = Math.max(-1000, Math.min(1000, mouse.position.x));
+        mouse.position.z = Math.max(-1000, Math.min(1000, mouse.position.z));
+        
+        // Check if player is within 10 units of mouse (collectible)
+        const distance = camera.position.distanceTo(mouse.position);
+        if (distance < 10) {
+            catchMouse(mouse);
         }
     });
+    
+    // Update mice caught counter
+    updateMiceCounter();
 }
 
-// Handle catch event
-function handleCatch(predator, prey) {
-    if (!gameState.gameActive) return;
+// Handle mouse catch
+function catchMouse(mouse) {
+    if (!mouse.userData.alive) return;
+    
+    mouse.userData.alive = false;
+    mouse.visible = false;
+    gameState.miceCaught++;
+    
+    console.log(`Barn owl caught a mouse! Total: ${gameState.miceCaught}`);
+    updateMiceCounter();
+}
 
-    console.log(`${predator.userData.type} caught ${prey.userData.type}!`);
+// Update mice counter display
+function updateMiceCounter() {
+    const caughtElement = document.getElementById('caught');
+    if (caughtElement) {
+        if (currentPerspective === 'mouse') {
+            caughtElement.textContent = `${gameState.cheeseCollected}/10`;
+        } else {
+            caughtElement.textContent = `${gameState.miceCaught}/3`;
+        }
+    }
+}
 
-    // Update score
-    gameState.score += 10;
-    if (predator.userData.type === 'human') gameState.humanCaught++;
-    if (predator.userData.type === 'owl') gameState.owlCaught++;
+// Collect cheese (for mouse perspective)
+function collectCheese(cheese) {
+    if (cheese.userData.collected) return;
+    
+    cheese.userData.collected = true;
+    cheese.visible = false;
+    gameState.cheeseCollected++;
+    
+    // Play eating sound effect
+    playCheeseEatingSound();
+    
+    console.log(`Mouse collected cheese! Total: ${gameState.cheeseCollected}/10`);
+    updateMiceCounter();
+}
 
-    // Update UI
-    document.getElementById('score').textContent = gameState.score;
-    document.getElementById('caught').textContent = gameState.humanCaught + gameState.owlCaught + gameState.mouseCaught;
+// Play cheese eating sound effect
+function playCheeseEatingSound() {
+    // Create an audio context and play a simple eating sound
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // Create a "crunch" sound effect
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(400, audioContext.currentTime + 0.1);
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.15);
+}
 
-    // Respawn prey at random location
-    prey.position.set(
-        Math.random() * 1600 - 800,
-        prey.userData.eyeLevel,
-        Math.random() * 1600 - 800
-    );
+// Show falcon chase alert
+function showFalconAlert() {
+    // Only show alert in barn owl perspective
+    if (currentPerspective !== 'bird') return;
+    
+    const statusDiv = document.getElementById('gameStatus');
+    const messageDiv = document.getElementById('statusMessage');
+    if (statusDiv && messageDiv) {
+        messageDiv.textContent = '⚠️ FALCON CHASING BARN OWL!';
+        messageDiv.style.color = '#ff0000';
+        messageDiv.style.fontSize = '24px';
+        messageDiv.style.fontWeight = 'bold';
+        statusDiv.style.display = 'block';
+    }
+}
 
-    // Show notification
-    showGameMessage(`${predator.userData.type.toUpperCase()} caught ${prey.userData.type}!`, 2000);
+// Hide falcon chase alert
+function hideFalconAlert() {
+    const statusDiv = document.getElementById('gameStatus');
+    if (statusDiv) {
+        statusDiv.style.display = 'none';
+    }
 }
 
 // Show game message
