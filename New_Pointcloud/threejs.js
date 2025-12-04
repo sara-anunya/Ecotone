@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 let scene, camera, renderer, controls, pointCloud;
 let currentData = [];
@@ -8,6 +11,7 @@ let currentPerspective = 'human';
 let currentEyeLevel = 0;
 let targetCameraHeight = 0; // For smooth height transitions
 let originalPositions = null; // Store original point positions for displacement effect
+let composer, foveaPass; // Post-processing for barn owl fovea effect
 let originalColors = null; // Store original point colors
 let touchedByAnimal = null; // Track which animal touched each point (0=none, 1=mouse, 2=owl)
 
@@ -130,6 +134,79 @@ function init() {
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
+
+    // Post-processing setup for barn owl fovea
+    composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+
+    // Fovea shader: sharp center (acute vision) with blurred periphery
+    const FoveaShader = {
+        uniforms: {
+            'tDiffuse': { value: null },
+            'resolution': { value: new THREE.Vector2(container.clientWidth, container.clientHeight) },
+            'focalRadius': { value: 0.15 }, // Sharp central area (15% of screen)
+            'blurRadius': { value: 0.6 }    // Transition to full blur
+        },
+        vertexShader: `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D tDiffuse;
+            uniform vec2 resolution;
+            uniform float focalRadius;
+            uniform float blurRadius;
+            varying vec2 vUv;
+            
+            void main() {
+                vec2 center = vec2(0.5, 0.5);
+                float dist = distance(vUv, center);
+                
+                // Calculate blur amount based on distance from center
+                float blurAmount = smoothstep(focalRadius, blurRadius, dist);
+                
+                vec4 color = texture2D(tDiffuse, vUv);
+                
+                if (blurAmount > 0.01) {
+                    // Apply gaussian blur for peripheral vision
+                    vec2 texelSize = 1.0 / resolution;
+                    float blurSize = blurAmount * 8.0; // Max blur radius
+                    
+                    vec4 blurredColor = vec4(0.0);
+                    float totalWeight = 0.0;
+                    
+                    // 9-tap blur
+                    for(float x = -1.0; x <= 1.0; x += 1.0) {
+                        for(float y = -1.0; y <= 1.0; y += 1.0) {
+                            vec2 offset = vec2(x, y) * texelSize * blurSize;
+                            float weight = 1.0;
+                            blurredColor += texture2D(tDiffuse, vUv + offset) * weight;
+                            totalWeight += weight;
+                        }
+                    }
+                    blurredColor /= totalWeight;
+                    
+                    // Mix sharp and blurred based on distance
+                    color = mix(color, blurredColor, blurAmount);
+                }
+                
+                // Slight vignette for fovea effect
+                float vignette = 1.0 - (dist * 0.3);
+                color.rgb *= vignette;
+                
+                gl_FragColor = color;
+            }
+        `
+    };
+
+    foveaPass = new ShaderPass(FoveaShader);
+    foveaPass.renderToScreen = true;
+    foveaPass.enabled = false; // Start disabled
+    composer.addPass(foveaPass);
 
     // Controls - disabled for first-person keyboard navigation
     controls = new OrbitControls(camera, renderer.domElement);
@@ -320,6 +397,12 @@ function onWindowResize() {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
+    if (composer) {
+        composer.setSize(container.clientWidth, container.clientHeight);
+        if (foveaPass && foveaPass.uniforms.resolution) {
+            foveaPass.uniforms.resolution.value.set(container.clientWidth, container.clientHeight);
+        }
+    }
 }
 
 function createCircleTexture() {
@@ -522,7 +605,17 @@ function animate() {
     // Push points away from camera sphere
     pushPointsAway();
 
-    renderer.render(scene, camera);
+    // Enable/disable fovea effect for barn owl
+    if (foveaPass) {
+        foveaPass.enabled = (currentPerspective === 'bird');
+    }
+
+    // Render with or without post-processing
+    if (currentPerspective === 'bird' && composer) {
+        composer.render();
+    } else {
+        renderer.render(scene, camera);
+    }
 }
 
 function updateMouseVisibility() {
