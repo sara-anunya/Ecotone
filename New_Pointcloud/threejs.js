@@ -32,8 +32,9 @@ const perspectiveSettings = {
         scrollSpeed: 0.5,     // Scroll/zoom speed
         rotateSpeed: 1.0,     // Rotation speed multiplier
         fov: 75,              // Field of view
-        terrainFollow: false, // Does not follow terrain
-        description: 'Adult human standing eye level (152.5cm)'
+        terrainFollow: true,  // Follows terrain contours like mouse
+        terrainOffset: 30,   // 5.75 feet = 5.75 * 30.48cm / 10 * 10 scale = .26 units above nearest point
+        description: 'Adult human standing eye level (5.75 feet above ground)'
     },
     bird: {
         eyeLevel: 30,         // Barn Owl flying height (~3m above ground) / 10 - HIGHEST
@@ -430,49 +431,84 @@ function handleMovement() {
     forward.y = 0; // Keep movement horizontal
     forward.normalize();
 
-    // Edge-based rotation: cursor near screen edges rotates camera
-    const edgeThreshold = 0.15; // 15% from edge triggers rotation
-    const rotationSpeed = settings.rotateSpeed * 0.03; // Rotation speed
-    
-    // Horizontal rotation (left/right)
-    if (mouseX < edgeThreshold) {
-        // Near left edge - rotate left
-        const intensity = (edgeThreshold - mouseX) / edgeThreshold;
-        cameraRotationY += rotationSpeed * intensity;
-    } else if (mouseX > (1 - edgeThreshold)) {
-        // Near right edge - rotate right
-        const intensity = (mouseX - (1 - edgeThreshold)) / edgeThreshold;
-        cameraRotationY -= rotationSpeed * intensity;
-    }
-    
-    // Vertical rotation (up/down)
-    if (mouseY < edgeThreshold) {
-        // Near top edge - look up
-        const intensity = (edgeThreshold - mouseY) / edgeThreshold;
-        cameraRotationX += rotationSpeed * intensity * 0.5; // Half speed for vertical
-    } else if (mouseY > (1 - edgeThreshold)) {
-        // Near bottom edge - look down
-        const intensity = (mouseY - (1 - edgeThreshold)) / edgeThreshold;
-        cameraRotationX -= rotationSpeed * intensity * 0.5;
-    }
-    
-    // Clamp vertical rotation to prevent over-rotation
-    cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
-    
-    // Apply rotation using Euler angles
-    camera.rotation.order = 'YXZ';
-    camera.rotation.y = cameraRotationY;
-    camera.rotation.x = cameraRotationX;
+    // Barn owl: continuous movement mode - cursor position controls direction and rotation
+    if (currentPerspective === 'bird') {
+        // Calculate cursor offset from center (0.5, 0.5)
+        const offsetX = mouseX - 0.5;
+        const offsetY = mouseY - 0.5;
+        
+        // Calculate distance from center (0 to ~0.707 for corners)
+        const distanceFromCenter = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
+        
+        // Rotation based on cursor position relative to center
+        const rotationSpeed = settings.rotateSpeed * 0.05;
+        
+        // Horizontal rotation - cursor left/right of center
+        cameraRotationY += offsetX * rotationSpeed * 2;
+        
+        // Vertical rotation - cursor up/down from center
+        cameraRotationX -= offsetY * rotationSpeed;
+        
+        // Clamp vertical rotation
+        cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
+        
+        // Apply rotation
+        camera.rotation.order = 'YXZ';
+        camera.rotation.y = cameraRotationY;
+        camera.rotation.x = cameraRotationX;
+        
+        // Continuous forward movement (always moving)
+        // Movement speed scales slightly with distance from center (faster when cursor is further from center)
+        const movementIntensity = Math.min(distanceFromCenter * 2, 1); // 0 to 1
+        const baseMovement = 0.5; // Always move at least 50% speed
+        const finalSpeed = currentMoveSpeed * (baseMovement + movementIntensity * 0.5);
+        
+        camera.position.addScaledVector(forward, finalSpeed);
+    } else {
+        // Human and mouse: edge-based rotation with manual movement
+        const edgeThreshold = 0.15; // 15% from edge triggers rotation
+        const rotationSpeed = settings.rotateSpeed * 0.03; // Rotation speed
+        
+        // Horizontal rotation (left/right)
+        if (mouseX < edgeThreshold) {
+            // Near left edge - rotate left
+            const intensity = (edgeThreshold - mouseX) / edgeThreshold;
+            cameraRotationY += rotationSpeed * intensity;
+        } else if (mouseX > (1 - edgeThreshold)) {
+            // Near right edge - rotate right
+            const intensity = (mouseX - (1 - edgeThreshold)) / edgeThreshold;
+            cameraRotationY -= rotationSpeed * intensity;
+        }
+        
+        // Vertical rotation (up/down)
+        if (mouseY < edgeThreshold) {
+            // Near top edge - look up
+            const intensity = (edgeThreshold - mouseY) / edgeThreshold;
+            cameraRotationX += rotationSpeed * intensity * 0.5; // Half speed for vertical
+        } else if (mouseY > (1 - edgeThreshold)) {
+            // Near bottom edge - look down
+            const intensity = (mouseY - (1 - edgeThreshold)) / edgeThreshold;
+            cameraRotationX -= rotationSpeed * intensity * 0.5;
+        }
+        
+        // Clamp vertical rotation to prevent over-rotation
+        cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
+        
+        // Apply rotation using Euler angles
+        camera.rotation.order = 'YXZ';
+        camera.rotation.y = cameraRotationY;
+        camera.rotation.x = cameraRotationX;
 
-    // Forward/backward movement with arrow keys (now only for manual control)
-    if (keys.forward) {
-        camera.position.addScaledVector(forward, currentMoveSpeed);
-    }
-    if (keys.backward) {
-        camera.position.addScaledVector(forward, -currentMoveSpeed);
+        // Forward/backward movement with arrow keys
+        if (keys.forward) {
+            camera.position.addScaledVector(forward, currentMoveSpeed);
+        }
+        if (keys.backward) {
+            camera.position.addScaledVector(forward, -currentMoveSpeed);
+        }
     }
 
-    // Handle terrain following for mouse perspective
+    // Handle terrain following for mouse and human perspectives
     if (settings.terrainFollow && pointCloud) {
         const terrainHeight = getTerrainHeightAtPosition(camera.position.x, camera.position.z);
         if (terrainHeight !== null) {
