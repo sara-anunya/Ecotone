@@ -6,6 +6,7 @@ let currentData = [];
 let currentMaxZPercent = 100;
 let currentPerspective = 'human';
 let currentEyeLevel = 0;
+let targetCameraHeight = 0; // For smooth height transitions
 
 // Game entities - predator vs prey
 let humanCharacter, owlCharacter, mouseCharacter;
@@ -21,31 +22,38 @@ let gameState = {
 // Data represents 150,000 sq ft area (~13,935 sq meters)
 // Scene is normalized to ~2000 units, so 1 unit ≈ 6.97 sq ft
 // Human: 145-160cm (avg ~152.5cm) - medium height
-// Bird (flying): 3-10m above ground - highest viewpoint
+// Barn Owl (flying): 3-10m above ground - highest viewpoint
 // Mouse: 2.5-5cm above ground - ground level
 const perspectiveSettings = {
     human: {
         eyeLevel: 15.25,      // Average human eye level in cm (standing) / 10
         cursorSize: 40,       // Cursor size in pixels
         moveSpeed: 2.0,       // Medium walking speed (scaled to area)
-        scrollSpeed: 2.0,     // Scroll/zoom speed
+        scrollSpeed: 0.5,     // Scroll/zoom speed
         rotateSpeed: 1.0,     // Rotation speed multiplier
+        fov: 75,              // Field of view
+        terrainFollow: false, // Does not follow terrain
         description: 'Adult human standing eye level (152.5cm)'
     },
     bird: {
-        eyeLevel: 30,         // Bird flying height (~3m above ground) / 10 - HIGHEST
-        cursorSize: 20,       // Medium cursor for bird
-        moveSpeed: 4.0,       // Fastest movement (birds fly quickly)
-        scrollSpeed: 4.0,     // Fastest scroll speed
-        rotateSpeed: 1.2,     // Birds can turn slightly faster
-        description: 'Small bird flying eye level (~3m high)'
+        eyeLevel: 30,         // Barn Owl flying height (~3m above ground) / 10 - HIGHEST
+        cursorSize: 60,       // Larger cursor for barn owl (wide field of view)
+        moveSpeed: 5.0,       // Fast movement (barn owls fly quickly)
+        scrollSpeed: 1.2,     // Fast scroll speed
+        rotateSpeed: 1.5,     // Barn owls can turn faster
+        fov: 110,             // Wide field of view for flying
+        terrainFollow: false, // Maintains fixed altitude
+        description: 'Barn owl flying eye level (~3m high)'
     },
     mouse: {
         eyeLevel: 0.375,      // Mouse eye level in cm (very low, 2.5-5cm avg) / 10 - GROUND LEVEL
-        cursorSize: 15,       // Small cursor for mouse
-        moveSpeed: 1.0,       // Slowest movement (small animals)
-        scrollSpeed: 1.0,     // Slowest scroll speed
-        rotateSpeed: 0.9,     // Mice turn slightly slower
+        cursorSize: 25,       // Smaller cursor for mouse
+        moveSpeed: 1.2,       // Quick, scurrying movement
+        scrollSpeed: 0.1,     // Slower scroll speed
+        rotateSpeed: 0.8,     // Mice turn more carefully
+        fov: 70,              // Wide field of view (prey animal)
+        terrainFollow: true,  // Follows terrain contours
+        terrainOffset: 30,    // 1 foot = 30cm / 10 = 3 units * 10 scale = 30 units above nearest point
         description: 'Mouse eye level (3.75cm from ground)'
     }
 };
@@ -71,12 +79,16 @@ const iNaturalistData = [
 
 let raycaster, mouse, linkedPoints = [];
 let linkedPointMarkers = [];
-let keys = { forward: false, backward: false, left: false, right: false, zoomIn: false, zoomOut: false };
+let keys = { forward: false, backward: false, zoomIn: false, zoomOut: false };
+let mouseX = 0.5; // Normalized mouse X position (0 to 1)
+let mouseY = 0.5; // Normalized mouse Y position (0 to 1)
+let cameraRotationY = 0; // Horizontal rotation (yaw)
+let cameraRotationX = 0; // Vertical rotation (pitch)
 
 function init() {
     // Scene
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a0a);
+    scene.background = new THREE.Color(0xffffff);
 
     // Camera
     const container = document.getElementById('container');
@@ -163,6 +175,10 @@ function init() {
         const container = document.getElementById('container');
         mouse.x = (e.clientX / container.clientWidth) * 2 - 1;
         mouse.y = -(e.clientY / container.clientHeight) * 2 + 1;
+        
+        // Track normalized mouse position for edge-based rotation
+        mouseX = e.clientX / container.clientWidth; // 0 (left) to 1 (right)
+        mouseY = e.clientY / container.clientHeight; // 0 (top) to 1 (bottom)
     });
 
     // Click handler for iNaturalist links
@@ -207,26 +223,9 @@ function init() {
                 keys.backward = true;
                 e.preventDefault();
                 break;
-            case 'ArrowLeft':
-            case 'a':
-            case 'A':
-                keys.left = true;
-                e.preventDefault();
-                break;
-            case 'ArrowRight':
-            case 'd':
-            case 'D':
-                keys.right = true;
-                e.preventDefault();
-                break;
-            case 'z':
-            case 'Z':
-                keys.zoomIn = true;
-                e.preventDefault();
-                break;
-            case 'x':
-            case 'X':
-                keys.zoomOut = true;
+            case ' ':
+                // Spacebar - toggle perspective
+                togglePerspective();
                 e.preventDefault();
                 break;
         }
@@ -243,24 +242,6 @@ function init() {
             case 's':
             case 'S':
                 keys.backward = false;
-                break;
-            case 'ArrowLeft':
-            case 'a':
-            case 'A':
-                keys.left = false;
-                break;
-            case 'ArrowRight':
-            case 'd':
-            case 'D':
-                keys.right = false;
-                break;
-            case 'z':
-            case 'Z':
-                keys.zoomIn = false;
-                break;
-            case 'x':
-            case 'X':
-                keys.zoomOut = false;
                 break;
         }
     });
@@ -299,6 +280,33 @@ function createCircleTexture() {
     return texture;
 }
 
+function togglePerspective() {
+    // Cycle through perspectives: human -> bird -> mouse -> human
+    const perspectives = ['human', 'bird', 'mouse'];
+    const currentIndex = perspectives.indexOf(currentPerspective);
+    const nextIndex = (currentIndex + 1) % perspectives.length;
+    const nextPerspective = perspectives[nextIndex];
+    
+    // Store current X and Z position
+    const currentX = camera.position.x;
+    const currentZ = camera.position.z;
+    
+    // Update perspective
+    updatePerspective(nextPerspective);
+    
+    // Restore X and Z position (Y will be updated by updatePerspective)
+    camera.position.x = currentX;
+    camera.position.z = currentZ;
+    
+    // Update radio button to reflect change
+    const radio = document.querySelector(`input[name="perspective"][value="${nextPerspective}"]`);
+    if (radio) {
+        radio.checked = true;
+    }
+    
+    console.log(`Toggled to ${nextPerspective} at position (${currentX.toFixed(2)}, ${currentZ.toFixed(2)})`);
+}
+
 function updatePerspective(perspective) {
     currentPerspective = perspective;
     const settings = perspectiveSettings[perspective];
@@ -312,6 +320,12 @@ function updatePerspective(perspective) {
         eyeLevelValue.textContent = currentEyeLevel.toFixed(2);
     }
 
+    // Update camera field of view
+    if (camera && settings.fov) {
+        camera.fov = settings.fov;
+        camera.updateProjectionMatrix();
+    }
+
     updateCameraHeight();
 
     // Update cursor size
@@ -320,6 +334,7 @@ function updatePerspective(perspective) {
     cursor.style.height = settings.cursorSize + 'px';
 
     console.log(`Switched to ${perspective} perspective:`, settings.description);
+    console.log(`FOV: ${settings.fov}°, Cursor: ${settings.cursorSize}px, Speed: ${settings.moveSpeed}`);
 }
 
 function updateCameraHeight() {
@@ -327,29 +342,39 @@ function updateCameraHeight() {
     const sceneHeightScale = 10; // Scale factor for better visibility
     const eyeLevelHeight = currentEyeLevel * sceneHeightScale;
 
-    // Store current position
-    const currentX = camera.position.x;
-    const currentZ = camera.position.z;
-
-    // Set camera position for first-person view
-    // Keep current X and Z position, only update Y (height)
-    camera.position.set(currentX, eyeLevelHeight, currentZ);
-
-    // Lock the camera to look straight ahead (horizontal view)
-    // Calculate a point in front of the camera at the same eye level
-    const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    forward.y = 0; // Keep direction horizontal
-    forward.normalize();
-
-    const lookAtPoint = new THREE.Vector3();
-    lookAtPoint.copy(camera.position);
-    lookAtPoint.addScaledVector(forward, 1000);
-    lookAtPoint.y = eyeLevelHeight; // Same height as camera for locked horizontal view
-    camera.lookAt(lookAtPoint);
+    // Only update Y (height), keep current X and Z position
+    camera.position.y = eyeLevelHeight;
 
     console.log(`Eye level: ${currentEyeLevel.toFixed(2)} | Scene height: ${eyeLevelHeight.toFixed(2)} units`);
-    console.log(`Camera position: (${currentX.toFixed(2)}, ${eyeLevelHeight.toFixed(2)}, ${currentZ.toFixed(2)})`);
+    console.log(`Camera position: (${camera.position.x.toFixed(2)}, ${eyeLevelHeight.toFixed(2)}, ${camera.position.z.toFixed(2)})`);
+}
+
+function getTerrainHeightAtPosition(x, z) {
+    if (!pointCloud || !pointCloud.geometry) return null;
+    
+    const positions = pointCloud.geometry.attributes.position;
+    const searchRadius = 100; // Search within this radius
+    let nearestHeight = null;
+    let minDistance = Infinity;
+    
+    // Search for nearest point within radius
+    for (let i = 0; i < positions.count; i++) {
+        const px = positions.getX(i);
+        const py = positions.getY(i); // Y is height in our coordinate system
+        const pz = positions.getZ(i);
+        
+        // Calculate horizontal distance only
+        const dx = px - x;
+        const dz = pz - z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        
+        if (distance < searchRadius && distance < minDistance) {
+            minDistance = distance;
+            nearestHeight = py;
+        }
+    }
+    
+    return nearestHeight;
 }
 
 function animate() {
@@ -366,57 +391,102 @@ function animate() {
 
     // Animate linked point markers (pulsing effect)
     animateLinkedMarkers();
+    
+    // Update fog for mouse perspective
+    updateMouseVisibility();
 
     renderer.render(scene, camera);
+}
+
+function updateMouseVisibility() {
+    // Only apply fog effect for mouse perspective
+    if (currentPerspective === 'mouse') {
+        // 45 feet = 45 * 30.48cm = 1371.6cm / 10 = 137.16 units * 10 scale = 1371.6 units
+        // Convert to scene scale: 45 feet ≈ 300 units in our normalized space
+        const visibilityRadius = 180; // 45 feet in scene coordinates
+        const fogStart = visibilityRadius * 0.6; // Fog starts at 60% of max distance
+        const fogEnd = visibilityRadius;
+        
+        if (!scene.fog) {
+            scene.fog = new THREE.Fog(0xffffff, fogStart, fogEnd);
+        } else {
+            scene.fog.near = fogStart;
+            scene.fog.far = fogEnd;
+        }
+    } else {
+        // Remove fog for other perspectives
+        scene.fog = null;
+    }
 }
 
 function handleMovement() {
     const settings = perspectiveSettings[currentPerspective];
     const eyeLevelHeight = currentEyeLevel * 10; // Same scale as updateCameraHeight
     const currentMoveSpeed = settings.moveSpeed; // Use animal-specific speed
-    const zoomSpeed = settings.scrollSpeed * 1.5; // Zoom is faster than regular movement
 
-    // Get camera's current forward and right directions
+    // Get camera's current forward direction
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
     forward.y = 0; // Keep movement horizontal
     forward.normalize();
 
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
-    right.normalize();
+    // Edge-based rotation: cursor near screen edges rotates camera
+    const edgeThreshold = 0.15; // 15% from edge triggers rotation
+    const rotationSpeed = settings.rotateSpeed * 0.03; // Rotation speed
+    
+    // Horizontal rotation (left/right)
+    if (mouseX < edgeThreshold) {
+        // Near left edge - rotate left
+        const intensity = (edgeThreshold - mouseX) / edgeThreshold;
+        cameraRotationY += rotationSpeed * intensity;
+    } else if (mouseX > (1 - edgeThreshold)) {
+        // Near right edge - rotate right
+        const intensity = (mouseX - (1 - edgeThreshold)) / edgeThreshold;
+        cameraRotationY -= rotationSpeed * intensity;
+    }
+    
+    // Vertical rotation (up/down)
+    if (mouseY < edgeThreshold) {
+        // Near top edge - look up
+        const intensity = (edgeThreshold - mouseY) / edgeThreshold;
+        cameraRotationX += rotationSpeed * intensity * 0.5; // Half speed for vertical
+    } else if (mouseY > (1 - edgeThreshold)) {
+        // Near bottom edge - look down
+        const intensity = (mouseY - (1 - edgeThreshold)) / edgeThreshold;
+        cameraRotationX -= rotationSpeed * intensity * 0.5;
+    }
+    
+    // Clamp vertical rotation to prevent over-rotation
+    cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
+    
+    // Apply rotation using Euler angles
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = cameraRotationY;
+    camera.rotation.x = cameraRotationX;
 
-    // Apply movement based on key states with animal-specific speed
+    // Forward/backward movement with arrow keys (now only for manual control)
     if (keys.forward) {
         camera.position.addScaledVector(forward, currentMoveSpeed);
     }
     if (keys.backward) {
         camera.position.addScaledVector(forward, -currentMoveSpeed);
     }
-    if (keys.left) {
-        camera.position.addScaledVector(right, -currentMoveSpeed);
-    }
-    if (keys.right) {
-        camera.position.addScaledVector(right, currentMoveSpeed);
-    }
 
-    // Zoom in/out with Z and X keys
-    if (keys.zoomIn) {
-        camera.position.addScaledVector(forward, zoomSpeed);
+    // Handle terrain following for mouse perspective
+    if (settings.terrainFollow && pointCloud) {
+        const terrainHeight = getTerrainHeightAtPosition(camera.position.x, camera.position.z);
+        if (terrainHeight !== null) {
+            targetCameraHeight = terrainHeight + settings.terrainOffset;
+        } else {
+            targetCameraHeight = eyeLevelHeight;
+        }
+        // Smooth interpolation (lerp) for Y-axis - 0.05 = smoothing factor (lower = smoother)
+        camera.position.y += (targetCameraHeight - camera.position.y) * 0.05;
+    } else {
+        // Lock the Y position to eye level (no vertical movement)
+        camera.position.y = eyeLevelHeight;
+        targetCameraHeight = eyeLevelHeight;
     }
-    if (keys.zoomOut) {
-        camera.position.addScaledVector(forward, -zoomSpeed);
-    }
-
-    // Lock the Y position to eye level (no vertical movement)
-    camera.position.y = eyeLevelHeight;
-
-    // Keep camera looking straight ahead at eye level (first-person view)
-    const lookAtPoint = new THREE.Vector3();
-    lookAtPoint.copy(camera.position);
-    lookAtPoint.addScaledVector(forward, 1000);
-    lookAtPoint.y = eyeLevelHeight; // Lock vertical looking angle
-    camera.lookAt(lookAtPoint);
 }
 
 function animateLinkedMarkers() {
@@ -573,10 +643,15 @@ function visualizeData(data) {
     const rangeY = maxY - minY;
     const rangeZ = maxZ - minZ;
     const maxRange = Math.max(rangeX, rangeY, rangeZ);
-    const scale = 2000 / maxRange; // Scale to fit in a 2000 unit cube
+    let scale = 2000 / maxRange; // Scale to fit in a 2000 unit cube
+    
+    // Scale up by 10x for mouse perspective (makes world appear larger relative to small mouse)
+    if (currentPerspective === 'mouse') {
+        scale *= 10;
+    }
 
     console.log(`Ranges: X=${rangeX}, Y=${rangeY}, Z=${rangeZ}`);
-    console.log(`Scale factor: ${scale}`);
+    console.log(`Scale factor: ${scale} (${currentPerspective} perspective)`);
 
     // Create geometry
     const geometry = new THREE.BufferGeometry();
@@ -588,11 +663,11 @@ function visualizeData(data) {
 
     // Color interpolation from red (low Z) to blue (high Z)
     function getColor(z) {
-        const normalized = Math.min(1, (z - minZ) / (effectiveMaxZ - minZ));
+        // Use solid color #063a3d
         return {
-            r: 1 - normalized,
-            g: 0,
-            b: normalized
+            r: 0x06 / 255,
+            g: 0x3a / 255,
+            b: 0x3d / 255
         };
     }
 
@@ -613,17 +688,17 @@ function visualizeData(data) {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     // Create material - smaller points for larger datasets
-    let pointSize = 8;
-    if (data.length > 1000000) pointSize = 1;
-    else if (data.length > 200000) pointSize = 1.5;
-    else if (data.length > 50000) pointSize = 3;
+    let pointSize = 12;
+    if (data.length > 1000000) pointSize = 3;
+    else if (data.length > 200000) pointSize = 4;
+    else if (data.length > 50000) pointSize = 6;
 
     const material = new THREE.PointsMaterial({
         size: pointSize,
         vertexColors: true,
         sizeAttenuation: true,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.9,
         map: createCircleTexture(),  // Add circular texture for spherical points
         alphaTest: 0.5,
         depthWrite: true
@@ -754,7 +829,7 @@ function createGameCharacters() {
     scene.add(humanCharacter);
 
     // Owl: 1 foot = ~30cm = 300 units
-    // Flying bird
+    // Flying barn owl
     const owlGeometry = new THREE.SphereGeometry(15, 32, 32); // 1ft diameter
     const owlMaterial = new THREE.MeshPhongMaterial({
         color: 0x8B4513,
@@ -817,7 +892,7 @@ function updateAICharacters() {
     characters.forEach(character => {
         const data = character.userData;
 
-        // Check if being controlled by player (bird perspective controls owl)
+        // Check if being controlled by player (barn owl perspective controls owl)
         const isPlayer = (currentPerspective === 'human' && character === humanCharacter) ||
                         (currentPerspective === 'bird' && character === owlCharacter) ||
                         (currentPerspective === 'mouse' && character === mouseCharacter);

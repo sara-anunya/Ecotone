@@ -9,6 +9,7 @@ body {
     height: 100vh;
     overflow: hidden;
     background-color: #0a0a0a;
+    font-family: 'Darker Grotesque', sans-serif;
 }
 
 #pointcloud {
