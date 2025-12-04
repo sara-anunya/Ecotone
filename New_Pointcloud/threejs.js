@@ -37,6 +37,8 @@ const perspectiveSettings = {
         scrollSpeed: 0.5,     // Scroll/zoom speed
         rotateSpeed: 0.5,     // Rotation speed multiplier
         fov: 75,              // Field of view
+        near: 1,              // Default near plane
+        far: 100000,          // Default far plane
         terrainFollow: true,  // Follows terrain contours like mouse
         terrainOffset: 30,   // 5.75 feet = 5.75 * 30.48cm / 10 * 10 scale = .26 units above nearest point
         sphereRadius: 20,      // Radius for point pushing - creates tunnel effect
@@ -50,6 +52,8 @@ const perspectiveSettings = {
         scrollSpeed: 2.0,     // Fast scroll speed
         rotateSpeed: 0.5,     // Barn owls can turn faster
         fov: 110,             // Wide field of view for flying
+        near: 1,              // Default near plane
+        far: 100000,          // Default far plane
         terrainFollow: false, // Maintains fixed altitude
         sphereRadius: 5,    // Radius for point pushing
         worldScale: 15.0,     // 15x scale (barn owl ~30cm tall, world appears much larger)
@@ -61,12 +65,14 @@ const perspectiveSettings = {
         moveSpeed: 1.2,       // Quick, scurrying movement
         scrollSpeed: 0.1,     // Slower scroll speed
         rotateSpeed: 0.4,     // Mice turn more carefully
-        fov: 70,              // Wide field of view (prey animal)
+        fov: 95,              // Very wide FOV (mice have ~310° vision, simulated with wider FOV)
+        near: 5,              // Close near plane (mice are nearsighted)
+        far: 3000,            // Limited far plane (poor distance vision, objects fade quickly)
         terrainFollow: true,  // Follows terrain contours
-        terrainOffset: 30,    // 1 foot = 30cm / 10 = 3 units * 10 scale = 30 units above nearest point
+        terrainOffset: 5,    // 1 foot = 30cm / 10 = 3 units * 10 scale = 30 units above nearest point
         sphereRadius: 1,    // Radius for point pushing
         worldScale: 100.0,    // 100x scale (mouse ~7cm tall, world appears massive)
-        description: 'Mouse eye level (3.75cm from ground)'
+        description: 'Mouse eye level (3.75cm from ground) - Wide FOV, nearsighted vision'
     }
 };
 
@@ -376,9 +382,11 @@ function updatePerspective(perspective) {
         eyeLevelValue.textContent = currentEyeLevel.toFixed(2);
     }
 
-    // Update camera field of view
+    // Update camera field of view and clipping planes
     if (camera && settings.fov) {
         camera.fov = settings.fov;
+        camera.near = settings.near || 1;
+        camera.far = settings.far || 100000;
         camera.updateProjectionMatrix();
     }
 
