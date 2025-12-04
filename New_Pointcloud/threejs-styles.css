@@ -26,6 +26,7 @@ body {
     padding: 15px;
     border-radius: 8px;
     min-width: 250px;
+    display: none;
 }
 
 .controls label {
@@ -84,6 +85,37 @@ body {
     z-index: 9999;
     transition: width 0.3s, height 0.3s, border-color 0.1s, background-color 0.1s;
     box-shadow: 0 0 10px rgba(6, 58, 61, 0.3);
+}
+
+#crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 9999;
+    display: none;
+}
+
+.crosshair-line {
+    position: absolute;
+    background-color: rgba(6, 58, 61, 0.8);
+}
+
+.crosshair-horizontal {
+    width: 30px;
+    height: 2px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.crosshair-vertical {
+    width: 2px;
+    height: 30px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
 }
 
 #info {

@@ -28,7 +28,7 @@ const perspectiveSettings = {
     human: {
         eyeLevel: 15.25,      // Average human eye level in cm (standing) / 10
         cursorSize: 40,       // Cursor size in pixels
-        moveSpeed: 2.0,       // Medium walking speed (scaled to area)
+        moveSpeed: 1,       // Medium walking speed (scaled to area)
         scrollSpeed: 0.5,     // Scroll/zoom speed
         rotateSpeed: 1.0,     // Rotation speed multiplier
         fov: 75,              // Field of view
@@ -39,9 +39,9 @@ const perspectiveSettings = {
     bird: {
         eyeLevel: 30,         // Barn Owl flying height (~3m above ground) / 10 - HIGHEST
         cursorSize: 60,       // Larger cursor for barn owl (wide field of view)
-        moveSpeed: 5.0,       // Fast movement (barn owls fly quickly)
-        scrollSpeed: 1.2,     // Fast scroll speed
-        rotateSpeed: 1.5,     // Barn owls can turn faster
+        moveSpeed: 0.5,       // Fast movement (barn owls fly quickly)
+        scrollSpeed: 2.0,     // Fast scroll speed
+        rotateSpeed: 1.0,     // Barn owls can turn faster
         fov: 110,             // Wide field of view for flying
         terrainFollow: false, // Maintains fixed altitude
         description: 'Barn owl flying eye level (~3m high)'
@@ -329,10 +329,20 @@ function updatePerspective(perspective) {
 
     updateCameraHeight();
 
-    // Update cursor size
+    // Update cursor size and crosshair visibility
     const cursor = document.getElementById('cursor');
+    const crosshair = document.getElementById('crosshair');
     cursor.style.width = settings.cursorSize + 'px';
     cursor.style.height = settings.cursorSize + 'px';
+    
+    // Show crosshair for barn owl, hide cursor; hide crosshair for others
+    if (currentPerspective === 'bird') {
+        crosshair.style.display = 'block';
+        cursor.style.display = 'none';
+    } else {
+        crosshair.style.display = 'none';
+        cursor.style.display = 'block';
+    }
 
     console.log(`Switched to ${perspective} perspective:`, settings.description);
     console.log(`FOV: ${settings.fov}°, Cursor: ${settings.cursorSize}px, Speed: ${settings.moveSpeed}`);
@@ -428,84 +438,59 @@ function handleMovement() {
     // Get camera's current forward direction
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
-    forward.y = 0; // Keep movement horizontal
+    
+    // For barn owl: keep full 3D direction (including Y for vertical movement)
+    // For others: keep movement horizontal only
+    if (currentPerspective !== 'bird') {
+        forward.y = 0; // Keep movement horizontal
+    }
     forward.normalize();
 
-    // Barn owl: continuous movement mode - cursor position controls direction and rotation
-    if (currentPerspective === 'bird') {
-        // Calculate cursor offset from center (0.5, 0.5)
-        const offsetX = mouseX - 0.5;
-        const offsetY = mouseY - 0.5;
-        
-        // Calculate distance from center (0 to ~0.707 for corners)
-        const distanceFromCenter = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
-        
-        // Rotation based on cursor position relative to center
-        const rotationSpeed = settings.rotateSpeed * 0.05;
-        
-        // Horizontal rotation - cursor left/right of center
-        cameraRotationY += offsetX * rotationSpeed * 2;
-        
-        // Vertical rotation - cursor up/down from center
-        cameraRotationX -= offsetY * rotationSpeed;
-        
-        // Clamp vertical rotation
-        cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
-        
-        // Apply rotation
-        camera.rotation.order = 'YXZ';
-        camera.rotation.y = cameraRotationY;
-        camera.rotation.x = cameraRotationX;
-        
-        // Continuous forward movement (always moving)
-        // Movement speed scales slightly with distance from center (faster when cursor is further from center)
-        const movementIntensity = Math.min(distanceFromCenter * 2, 1); // 0 to 1
-        const baseMovement = 0.5; // Always move at least 50% speed
-        const finalSpeed = currentMoveSpeed * (baseMovement + movementIntensity * 0.5);
-        
-        camera.position.addScaledVector(forward, finalSpeed);
-    } else {
-        // Human and mouse: edge-based rotation with manual movement
-        const edgeThreshold = 0.15; // 15% from edge triggers rotation
-        const rotationSpeed = settings.rotateSpeed * 0.03; // Rotation speed
-        
-        // Horizontal rotation (left/right)
-        if (mouseX < edgeThreshold) {
-            // Near left edge - rotate left
-            const intensity = (edgeThreshold - mouseX) / edgeThreshold;
-            cameraRotationY += rotationSpeed * intensity;
-        } else if (mouseX > (1 - edgeThreshold)) {
-            // Near right edge - rotate right
-            const intensity = (mouseX - (1 - edgeThreshold)) / edgeThreshold;
-            cameraRotationY -= rotationSpeed * intensity;
-        }
-        
-        // Vertical rotation (up/down)
-        if (mouseY < edgeThreshold) {
-            // Near top edge - look up
-            const intensity = (edgeThreshold - mouseY) / edgeThreshold;
-            cameraRotationX += rotationSpeed * intensity * 0.5; // Half speed for vertical
-        } else if (mouseY > (1 - edgeThreshold)) {
-            // Near bottom edge - look down
-            const intensity = (mouseY - (1 - edgeThreshold)) / edgeThreshold;
-            cameraRotationX -= rotationSpeed * intensity * 0.5;
-        }
-        
-        // Clamp vertical rotation to prevent over-rotation
-        cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
-        
-        // Apply rotation using Euler angles
-        camera.rotation.order = 'YXZ';
-        camera.rotation.y = cameraRotationY;
-        camera.rotation.x = cameraRotationX;
+    // Edge-based rotation: cursor near screen edges rotates camera
+    const edgeThreshold = 0.15; // 15% from edge triggers rotation
+    const rotationSpeed = settings.rotateSpeed * 0.03; // Rotation speed
+    
+    // Horizontal rotation (left/right)
+    if (mouseX < edgeThreshold) {
+        // Near left edge - rotate left
+        const intensity = (edgeThreshold - mouseX) / edgeThreshold;
+        cameraRotationY += rotationSpeed * intensity;
+    } else if (mouseX > (1 - edgeThreshold)) {
+        // Near right edge - rotate right
+        const intensity = (mouseX - (1 - edgeThreshold)) / edgeThreshold;
+        cameraRotationY -= rotationSpeed * intensity;
+    }
+    
+    // Vertical rotation (up/down)
+    if (mouseY < edgeThreshold) {
+        // Near top edge - look up
+        const intensity = (edgeThreshold - mouseY) / edgeThreshold;
+        cameraRotationX += rotationSpeed * intensity * 0.5; // Half speed for vertical
+    } else if (mouseY > (1 - edgeThreshold)) {
+        // Near bottom edge - look down
+        const intensity = (mouseY - (1 - edgeThreshold)) / edgeThreshold;
+        cameraRotationX -= rotationSpeed * intensity * 0.5;
+    }
+    
+    // Clamp vertical rotation to prevent over-rotation
+    cameraRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotationX));
+    
+    // Apply rotation using Euler angles
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = cameraRotationY;
+    camera.rotation.x = cameraRotationX;
 
-        // Forward/backward movement with arrow keys
-        if (keys.forward) {
-            camera.position.addScaledVector(forward, currentMoveSpeed);
-        }
-        if (keys.backward) {
-            camera.position.addScaledVector(forward, -currentMoveSpeed);
-        }
+    // Barn owl: continuously moves forward (default state)
+    if (currentPerspective === 'bird') {
+        camera.position.addScaledVector(forward, currentMoveSpeed);
+    }
+
+    // Forward/backward movement with arrow keys (for human and mouse manual control)
+    if (keys.forward) {
+        camera.position.addScaledVector(forward, currentMoveSpeed);
+    }
+    if (keys.backward) {
+        camera.position.addScaledVector(forward, -currentMoveSpeed);
     }
 
     // Handle terrain following for mouse and human perspectives
@@ -518,11 +503,12 @@ function handleMovement() {
         }
         // Smooth interpolation (lerp) for Y-axis - 0.05 = smoothing factor (lower = smoother)
         camera.position.y += (targetCameraHeight - camera.position.y) * 0.05;
-    } else {
-        // Lock the Y position to eye level (no vertical movement)
+    } else if (currentPerspective !== 'bird') {
+        // Lock the Y position to eye level (no vertical movement) - but NOT for bird
         camera.position.y = eyeLevelHeight;
         targetCameraHeight = eyeLevelHeight;
     }
+    // Bird perspective: Y position is controlled by 3D movement direction, no override
 }
 
 function animateLinkedMarkers() {
@@ -710,7 +696,7 @@ function visualizeData(data) {
     // Fill position and color arrays
     data.forEach((point, i) => {
         const idx = i * 3;
-        positions[idx] = (point.x - centerX) * scale;
+        positions[idx] = -(point.x - centerX) * scale; // Mirror on X-axis to match Rhino
         positions[idx + 1] = (point.z - minZ) * scale; // Use Z as height, starting from 0
         positions[idx + 2] = (point.y - centerY) * scale; // Use Y as depth (Z in 3D)
 

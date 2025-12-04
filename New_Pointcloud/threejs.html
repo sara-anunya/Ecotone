@@ -27,10 +27,16 @@
         <label><input type="radio" name="perspective" value="mouse"> Mouse</label>
     </div>
     <div id="cursor"></div>
+    <div id="crosshair">
+        <div class="crosshair-line crosshair-horizontal"></div>
+        <div class="crosshair-line crosshair-vertical"></div>
+    </div>
     <div id="info">
-        <strong>🎮 Predator vs Prey Game</strong><br>
-        <strong>Navigation:</strong> Arrow keys (↑↓←→) to move<br>
-        <strong>Goal:</strong> Find and catch other creatures!<br>
+        <strong>Navigation:</strong><br>
+        • Move cursor to screen edges to rotate view<br>
+        • Scroll to move forward/backward (Human/Mouse)<br>
+        • Barn Owl: auto-flies toward crosshair<br>
+        • Spacebar: toggle between perspectives<br>
         <strong>Score:</strong> <span id="score">0</span> | <strong>Caught:</strong> <span id="caught">0</span>
     </div>
     <div id="gameStatus">
